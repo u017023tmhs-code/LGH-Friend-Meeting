@@ -1,0 +1,7 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# 允許環境變數在 Netlify Functions 中透通
+[functions]
+  node_bundler = "esbuild"

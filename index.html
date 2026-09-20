@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>賴冠宏專屬網站 | 私人朋友聚會與活動回憶</title>
+  <meta name="description" content="賴冠宏專屬網站 - 專為好友打造的高級私人聚會與珍貴回憶記錄空間。">
+  
+  <!-- Google Fonts: Noto Sans TC + Cinzel + Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Noto+Sans+TC:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Ambient Gold Light Background Effect -->
+  <div class="ambient-glow glow-top" aria-hidden="true"></div>
+  <div class="ambient-glow glow-bottom" aria-hidden="true"></div>
+  
+  <!-- Subtle Dynamic Particle Canvas -->
+  <canvas id="particleCanvas" aria-hidden="true"></canvas>
+
+  <!-- ================= Header ================= -->
+  <header class="site-header" id="siteHeader">
+    <div class="header-inner container">
+      <!-- Left: LGH Monogram Logo + Brand Name -->
+      <a href="#hero" class="brand-group" id="brandLogoLink" aria-label="賴冠宏專屬網站 首頁">
+        <div class="lgh-monogram-wrapper">
+          <!-- Monogram SVG: L, G, H fusion with geometric elegance -->
+          <svg class="lgh-logo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#FCE79D" />
+                <stop offset="35%" stop-color="#D4AF37" />
+                <stop offset="70%" stop-color="#AA7C11" />
+                <stop offset="100%" stop-color="#F5D77F" />
+              </linearGradient>
+              <linearGradient id="goldStroke" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#AA7C11" stop-opacity="0.3" />
+                <stop offset="50%" stop-color="#FCE79D" stop-opacity="0.9" />
+                <stop offset="100%" stop-color="#AA7C11" stop-opacity="0.4" />
+              </linearGradient>
+              <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="2.5" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            <!-- Outer Luxury Hexagon Shield with Micro Inset -->
+            <polygon points="50,4 90,26 90,74 50,96 10,74 10,26" 
+                     stroke="url(#goldStroke)" stroke-width="1.6" fill="rgba(10, 11, 14, 0.75)" />
+            <polygon points="50,9 85,28.5 85,71.5 50,91 15,71.5 15,28.5" 
+                     stroke="url(#goldStroke)" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.6" />
+
+            <!-- Core Monogram Geometry fusing L, G, H -->
+            <!-- Left Vertical Stem (L & H left leg) -->
+            <path d="M 28 27 L 34 27 L 34 73 L 28 73 Z" fill="url(#goldGrad)" filter="url(#goldGlow)" />
+            
+            <!-- Bottom Bar of L -->
+            <path d="M 28 67 L 54 67 L 54 73 L 28 73 Z" fill="url(#goldGrad)" />
+            
+            <!-- H Crossbar connecting to G center -->
+            <path d="M 34 47 L 70 47 L 70 53 L 34 53 Z" fill="url(#goldGrad)" />
+
+            <!-- Right Vertical Stem of H (Upper & Lower) -->
+            <path d="M 66 27 L 72 27 L 72 47 L 66 47 Z" fill="url(#goldGrad)" />
+            <path d="M 66 53 L 72 53 L 72 73 L 66 73 Z" fill="url(#goldGrad)" />
+
+            <!-- G Outer Curve & Inward Spur -->
+            <path d="M 70 34 C 65 26, 45 25, 38 34" stroke="url(#goldGrad)" stroke-width="3" stroke-linecap="round" fill="none" />
+            <path d="M 38 66 C 45 75, 66 75, 72 65 L 72 52 L 56 52" stroke="url(#goldGrad)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+
+            <!-- Luxury Diamond Accents at Cardinal Points -->
+            <circle cx="50" cy="15" r="1.5" fill="#FCE79D" />
+            <circle cx="50" cy="85" r="1.5" fill="#FCE79D" />
+          </svg>
+          <div class="logo-shimmer"></div>
+        </div>
+
+        <div class="brand-info">
+          <span class="brand-monogram-label">LGH</span>
+          <span class="brand-title">賴冠宏專屬網站</span>
+          <span class="brand-badge">PRIVATE LOUNGE</span>
+        </div>
+      </a>
+
+      <!-- Desktop Nav & Action -->
+      <nav class="desktop-nav" aria-label="主要導覽">
+        <ul class="nav-links">
+          <li><a href="#hero" class="nav-link active">首頁</a></li>
+          <li><a href="#gatherings" class="nav-link">正在揪團</a></li>
+          <li><a href="#archived-memories" class="nav-link">回憶紀錄</a></li>
+          <li><a href="#events" class="nav-link">活動計畫</a></li>
+        </ul>
+        <div class="cloud-sync-status" id="cloudSyncStatus" title="點擊檢視雲端資料庫連線狀態與設定">
+          <span class="cloud-sync-dot"></span>
+          <span class="cloud-sync-text" id="cloudSyncText">雲端檢測中...</span>
+        </div>
+        <button class="btn-create-header" id="btnOpenCreateModalHeader">
+          <span class="btn-icon">＋</span>
+          <span class="btn-text">建立活動</span>
+          <span class="btn-light-sweep"></span>
+        </button>
+      </nav>
+
+      <!-- Mobile Hamburger Button -->
+      <button class="hamburger-btn" id="hamburgerBtn" aria-label="開啟選單" aria-expanded="false">
+        <span class="ham-line"></span>
+        <span class="ham-line"></span>
+        <span class="ham-line"></span>
+      </button>
+    </div>
+
+    <!-- Mobile Drawer Navigation -->
+    <div class="mobile-drawer" id="mobileDrawer" aria-hidden="true">
+      <div class="mobile-drawer-content">
+        <div class="mobile-drawer-header">
+          <div class="mobile-brand-tag">
+            <span class="gold-dot"></span>
+            <span>賴冠宏專屬網站 · 行動導覽</span>
+          </div>
+          <button class="drawer-close-btn" id="drawerCloseBtn" aria-label="關閉選單">✕</button>
+        </div>
+        <ul class="mobile-nav-links">
+          <li><a href="#hero" class="mobile-nav-link">首頁</a></li>
+          <li><a href="#gatherings" class="mobile-nav-link">✨ 正在揪團</a></li>
+          <li><a href="#archived-memories" class="mobile-nav-link">📖 回憶紀錄</a></li>
+          <li><a href="#events" class="mobile-nav-link">活動計畫</a></li>
+        </ul>
+        <div class="mobile-drawer-action">
+          <button class="btn-create-hero btn-full" id="btnOpenCreateModalMobile">
+            <span class="btn-icon">＋</span>
+            <span>建立活動</span>
+          </button>
+        </div>
+        <div class="mobile-drawer-footer">
+          <p>FOR PRIVATE FRIENDS GATHERINGS ONLY</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= Main Content ================= -->
+  <main>
+    <!-- ================= Hero Section ================= -->
+    <section class="hero-section" id="hero">
+      <div class="container hero-container">
+        <!-- Luxury Floating Badge -->
+        <div class="hero-badge-wrap">
+          <div class="hero-pill-badge">
+            <span class="sparkle-icon">✦</span>
+            <span class="badge-text">EXCLUSIVE FRIEND CIRCLE · 私人好友專屬天地</span>
+          </div>
+        </div>
+
+        <!-- Main Headlines -->
+        <div class="hero-content">
+          <h1 class="hero-title">
+            一起出去玩，<br class="mobile-break">
+            <span class="gold-gradient-text">留下每一次美好回憶。</span>
+          </h1>
+          <p class="hero-subtitle">
+            聚會、選擇、聊天，以及我們共同留下的回憶。
+          </p>
+        </div>
+
+        <!-- Hero Actions -->
+        <div class="hero-actions">
+          <button class="btn-create-hero" id="btnOpenCreateModalHero">
+            <span class="btn-gold-border"></span>
+            <span class="btn-icon">＋</span>
+            <span class="btn-text">建立活動</span>
+            <span class="btn-glow"></span>
+          </button>
+          <a href="#gatherings" class="btn-explore-glass">
+            <span>探索正在揪團</span>
+            <span class="arrow-right">→</span>
+          </a>
+        </div>
+
+        <!-- Premium Gathering Highlights Preview Cards -->
+        <div class="hero-feature-cards">
+          <div class="feature-card glass-panel">
+            <div class="card-glow-dot"></div>
+            <div class="feature-header">
+              <span class="feature-tag">NEXT GATHERING</span>
+              <span class="status-live">進行中籌備</span>
+            </div>
+            <h3 class="feature-title">陽明山星空包棟微醺之夜</h3>
+            <p class="feature-meta">📅 2026.10.24 (週六) · 📍 私人景觀別墅</p>
+            <div class="attendees-avatars">
+              <span class="avatar" title="賴冠宏 (Host)">冠</span>
+              <span class="avatar">銘</span>
+              <span class="avatar">萱</span>
+              <span class="avatar">宇</span>
+              <span class="avatar-more">+4</span>
+            </div>
+          </div>
+
+          <div class="feature-card glass-panel">
+            <div class="card-glow-dot"></div>
+            <div class="feature-header">
+              <span class="feature-tag">MEMORIES VAULT</span>
+              <span class="memory-count">128 張精彩照片</span>
+            </div>
+            <h3 class="feature-title">宜蘭海風露營與營火烤肉</h3>
+            <p class="feature-meta">🏆 年度最難忘出遊 · 8 位好友全員到齊</p>
+            <div class="memory-mini-preview">
+              <div class="thumb-frame"><span>🏕️ 露營</span></div>
+              <div class="thumb-frame"><span>🥩 營火</span></div>
+              <div class="thumb-frame"><span>🌊 海景</span></div>
+            </div>
+          </div>
+
+          <div class="feature-card glass-panel hide-on-mobile-sm">
+            <div class="card-glow-dot"></div>
+            <div class="feature-header">
+              <span class="feature-tag">POLL & VOTE</span>
+              <span class="vote-badge">投票熱烈</span>
+            </div>
+            <h3 class="feature-title">11 月秋季美食聚餐地點挑選</h3>
+            <p class="feature-meta">頂級日式和牛割烹 vs 私廚無菜單料理</p>
+            <div class="mini-progress-bar">
+              <div class="progress-fill" style="width: 75%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hero Bottom Scroll Indicator -->
+      <a href="#gatherings" class="scroll-down-hint" aria-label="向下捲動探索正在揪團">
+        <span class="scroll-text">SCROLL</span>
+        <span class="scroll-line"></span>
+      </a>
+    </section>
+
+    <!-- ================= Section: ✨ 正在揪團 (Active Gatherings) ================= -->
+    <section class="section-block gathering-section" id="gatherings">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-title-wrap">
+            <div class="pill-badge-mini">
+              <span class="gold-dot"></span>
+              <span>EXCLUSIVE GATHERING LIST</span>
+            </div>
+            <h2 class="section-heading">✨ 正在揪團</h2>
+            <p class="section-subtext">冠宏與好友們發起的專屬活動聚會，點擊即可查看選項與詳情</p>
+          </div>
+          <button class="btn-create-secondary" id="btnOpenCreateModalGathering">
+            <span>＋ 建立新揪團</span>
+          </button>
+        </div>
+
+        <!-- Dynamic Activity Cards Grid -->
+        <div class="activity-grid" id="activityGridContainer">
+          <!-- Rendered dynamically from localStorage by script.js -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Section: 📖 回憶紀錄 (Archived Activities) ================= -->
+    <section class="section-block archive-section" id="archived-memories">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-title-wrap">
+            <div class="pill-badge-mini">
+              <span class="gold-dot dot-silver"></span>
+              <span>PAST GATHERINGS & ARCHIVES</span>
+            </div>
+            <h2 class="section-heading">📖 回憶紀錄</h2>
+            <p class="section-subtext">已截止的聚會活動歷史紀錄，完整保存所有選項與好友選擇名單，永久留存美好回憶</p>
+          </div>
+          <span class="memories-counter" id="archivedCounter">共 0 場歷史回憶</span>
+        </div>
+
+        <!-- Archived Dynamic Activity Cards Grid -->
+        <div class="activity-grid" id="archivedGridContainer">
+          <!-- Rendered dynamically from localStorage by script.js -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Events Section Preview ================= -->
+    <section class="section-block" id="events">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-title-wrap">
+            <span class="gold-subtitle">UPCOMING & VOTING</span>
+            <h2 class="section-heading">聚會與活動計畫</h2>
+          </div>
+          <button class="btn-create-secondary" id="btnOpenCreateModalEvents">
+            <span>＋ 新增聚會</span>
+          </button>
+        </div>
+
+        <div class="events-grid" id="eventsGridContainer">
+          <!-- Event Card 1 -->
+          <article class="event-card glass-panel">
+            <div class="event-badge">籌備中</div>
+            <div class="event-category">Villa 渡假</div>
+            <h3 class="event-title">陽明山星空包棟微醺之夜</h3>
+            <p class="event-desc">秋高氣爽的週末，約大家上山泡湯、BBQ 烤肉與品酒暢聊，留下今年最舒服的一晚。</p>
+            <div class="event-details">
+              <div class="detail-item"><span class="icon">📅</span> 2026/10/24 (六) - 10/25 (日)</div>
+              <div class="detail-item"><span class="icon">📍</span> 陽明山私人景觀木屋別墅</div>
+              <div class="detail-item"><span class="icon">👥</span> 已確認 6 位 / 尚餘 2 位名額</div>
+            </div>
+            <div class="event-footer">
+              <span class="host-badge">主辦人：賴冠宏</span>
+              <button class="btn-card-action" onclick="alert('活動詳情頁面即將於第二階段開放！')">查看詳情</button>
+            </div>
+          </article>
+
+          <!-- Event Card 2 -->
+          <article class="event-card glass-panel">
+            <div class="event-badge voting">票選中</div>
+            <div class="event-category">美食聚餐</div>
+            <h3 class="event-title">11 月秋季頂級私廚聚會</h3>
+            <p class="event-desc">大家票選推薦的慶祝晚餐，目前在『隱密板前燒肉』與『法式無菜單料理』之間角逐中！</p>
+            <div class="event-details">
+              <div class="detail-item"><span class="icon">📅</span> 2026/11/14 (六) 18:30</div>
+              <div class="detail-item"><span class="icon">📍</span> 台北市信義區 / 大安區</div>
+              <div class="detail-item"><span class="icon">🗳️</span> 8 位好友已完成投票</div>
+            </div>
+            <div class="event-footer">
+              <span class="host-badge">發起人：賴冠宏</span>
+              <button class="btn-card-action" onclick="alert('投票功能將於後續功能階段正式整合！')">參與投票</button>
+            </div>
+          </article>
+
+          <!-- Event Card 3 -->
+          <article class="event-card glass-panel">
+            <div class="event-badge planning">構想中</div>
+            <div class="event-category">冬季滑雪</div>
+            <h3 class="event-title">2027 日本北海道粉雪跨年行</h3>
+            <p class="event-desc">先抓個出發時間與人數預算，準備提早訂機票與雪場度假村，有興趣的朋友快來卡位。</p>
+            <div class="event-details">
+              <div class="detail-item"><span class="icon">📅</span> 2026/12/29 - 2027/01/03</div>
+              <div class="detail-item"><span class="icon">📍</span> 日本北海道二世谷</div>
+              <div class="detail-item"><span class="icon">⛷️</span> 意願登記中</div>
+            </div>
+            <div class="event-footer">
+              <span class="host-badge">主辦人：賴冠宏</span>
+              <button class="btn-card-action" onclick="alert('滑雪企劃案即將更新！')">卡位意願</button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Memories Section Preview ================= -->
+    <section class="section-block section-memories" id="memories">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-title-wrap">
+            <span class="gold-subtitle">PHOTO ARCHIVE</span>
+            <h2 class="section-heading">我們的精彩回憶牆</h2>
+          </div>
+          <span class="memories-counter">共記錄 16 場聚會 · 520+ 歡樂瞬間</span>
+        </div>
+
+        <div class="memory-gallery-grid">
+          <!-- Memory 1 -->
+          <div class="memory-card glass-panel">
+            <div class="memory-media-wrap">
+              <div class="memory-placeholder-art art-1">
+                <span class="art-emoji">🏕️</span>
+                <span class="art-badge">CAMPING</span>
+              </div>
+            </div>
+            <div class="memory-info">
+              <span class="memory-date">2026.04.18 · 宜蘭南澳</span>
+              <h4 class="memory-title">海邊星空露營與徹夜暢談</h4>
+              <p class="memory-desc">海風、炭火烤肉，還有喝到微醺時講的那些真心話。</p>
+            </div>
+          </div>
+
+          <!-- Memory 2 -->
+          <div class="memory-card glass-panel">
+            <div class="memory-media-wrap">
+              <div class="memory-placeholder-art art-2">
+                <span class="art-emoji">🍾</span>
+                <span class="art-badge">BIRTHDAY</span>
+              </div>
+            </div>
+            <div class="memory-info">
+              <span class="memory-date">2025.12.31 · 台北信義</span>
+              <h4 class="memory-title">冠宏生日與跨年香檳派對</h4>
+              <p class="memory-desc">倒數煙火綻放的那一秒，大家緊緊抱在一起乾杯迎接新的一年。</p>
+            </div>
+          </div>
+
+          <!-- Memory 3 -->
+          <div class="memory-card glass-panel">
+            <div class="memory-media-wrap">
+              <div class="memory-placeholder-art art-3">
+                <span class="art-emoji">🏎️</span>
+                <span class="art-badge">ROADTRIP</span>
+              </div>
+            </div>
+            <div class="memory-info">
+              <span class="memory-date">2025.08.15 · 花東海岸</span>
+              <h4 class="memory-title">東海岸自駕公路旅行</h4>
+              <p class="memory-desc">車窗搖下吹著太平洋的海風，歌單一路唱到嗓子啞了。</p>
+            </div>
+          </div>
+
+          <!-- Memory 4 -->
+          <div class="memory-card glass-panel">
+            <div class="memory-media-wrap">
+              <div class="memory-placeholder-art art-4">
+                <span class="art-emoji">🥩</span>
+                <span class="art-badge">GOURMET</span>
+              </div>
+            </div>
+            <div class="memory-info">
+              <span class="memory-date">2025.05.20 · 私廚包廂</span>
+              <h4 class="memory-title">年中慶祝無菜單日式燒肉宴</h4>
+              <p class="memory-desc">入口即化的頂級和牛，好酒配好友就是人生最好的慰勞。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= Footer ================= -->
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-brand">
+        <div class="footer-logo-text">
+          <span class="gold-text">LGH</span> 賴冠宏專屬網站
+        </div>
+        <p class="footer-desc">專為知心好友打造的私人聚會與珍貴回憶典藏平台。</p>
+      </div>
+
+      <div class="footer-nav">
+        <a href="#hero">首頁</a>
+        <a href="#events">活動</a>
+        <a href="#memories">回憶</a>
+      </div>
+
+      <div class="footer-copyright">
+        <p>© 2026 賴冠宏 (LGH). All Rights Reserved. Private & Exclusive Circle.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ================= Modal: 建立活動 (Step UI: 3 Steps) ================= -->
+  <div class="modal-overlay" id="createModal" aria-hidden="true">
+    <div class="modal-dialog glass-panel step-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalStepTitle">
+      <button class="modal-close-btn" id="modalCloseBtn" aria-label="關閉視窗">✕</button>
+      
+      <!-- Step Progress Bar -->
+      <div class="step-progress-header">
+        <div class="step-badge-tag">
+          <span class="gold-dot"></span>
+          <span>CREATE NEW GATHERING</span>
+        </div>
+        <h2 class="modal-title" id="modalStepTitle">＋ 建立活動</h2>
+        
+        <!-- Step Indicators -->
+        <div class="step-indicator-track">
+          <div class="step-item active" data-step="1" id="stepIndicator1">
+            <div class="step-num">1</div>
+            <span class="step-label">基本資料</span>
+          </div>
+          <div class="step-connector" id="stepConnector1"></div>
+          <div class="step-item" data-step="2" id="stepIndicator2">
+            <div class="step-num">2</div>
+            <span class="step-label">活動選項</span>
+          </div>
+          <div class="step-connector" id="stepConnector2"></div>
+          <div class="step-item" data-step="3" id="stepIndicator3">
+            <div class="step-num">3</div>
+            <span class="step-label">確認建立</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 1: 基本資料 -->
+      <div class="step-panel active" id="stepPanel1">
+        <div class="form-group">
+          <label for="creatorInput">建立人姓名 <span class="required">*</span></label>
+          <input type="text" id="creatorInput" required placeholder="例如：冠宏" class="form-input" value="冠宏">
+        </div>
+
+        <div class="form-group">
+          <label for="titleInput">活動標題 <span class="required">*</span></label>
+          <input type="text" id="titleInput" required placeholder="例如：週末台中吃喝玩樂" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label>活動封面（支援 JPG、PNG、WEBP）</label>
+          <div class="cover-uploader-box" id="coverUploaderBox">
+            <input type="file" id="coverFileInput" accept="image/jpeg,image/png,image/webp" class="cover-file-input">
+            <div class="uploader-idle-state" id="uploaderIdleState">
+              <span class="upload-icon">📷</span>
+              <p class="upload-title">點擊或拖曳上傳聚會封面</p>
+              <p class="upload-hint">支援 JPG / PNG / WEBP · 若無上傳將自動套用專屬奢華背景</p>
+            </div>
+            <div class="uploader-preview-state" id="uploaderPreviewState" style="display: none;">
+              <img id="coverPreviewImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E" alt="封面預覽" class="cover-preview-img">
+              <button type="button" class="btn-remove-cover" id="btnRemoveCover" title="移除自訂封面">✕ 移除更換</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="deadlineInput">活動截止日期與時間 <span class="required">*</span></label>
+          <input type="datetime-local" id="deadlineInput" required class="form-input">
+          <span class="field-hint">好友投票與選擇的截止時間點</span>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" id="btnCancelStepModal">取消</button>
+          <button type="button" class="btn-create-hero" id="btnStep1Next">
+            <span class="btn-text">下一步：活動選項 →</span>
+            <span class="btn-glow"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: 活動選項 -->
+      <div class="step-panel" id="stepPanel2" style="display: none;">
+        <p class="step-desc">為這個聚會新增候選行程或活動，朋友可以共同選擇！</p>
+        
+        <div class="add-option-row">
+          <input type="text" id="optionTextInput" placeholder="輸入選項名稱，例如：🍜 吃火鍋、🎤 KTV..." class="form-input">
+          <button type="button" class="btn-add-option" id="btnAddOption">
+            <span>＋ 新增選項</span>
+          </button>
+        </div>
+
+        <!-- Quick Recommend Presets -->
+        <div class="quick-preset-wrap">
+          <span class="quick-label">常用靈感：</span>
+          <div class="preset-chips">
+            <button type="button" class="preset-chip" data-text="🍜 吃火鍋">🍜 吃火鍋</button>
+            <button type="button" class="preset-chip" data-text="🎬 看電影">🎬 看電影</button>
+            <button type="button" class="preset-chip" data-text="🎤 KTV">🎤 KTV</button>
+            <button type="button" class="preset-chip" data-text="🎮 打遊戲">🎮 打遊戲</button>
+            <button type="button" class="preset-chip" data-text="☕ 喝咖啡">☕ 喝咖啡</button>
+            <button type="button" class="preset-chip" data-text="🥩 頂級燒肉">🥩 頂級燒肉</button>
+          </div>
+        </div>
+
+        <!-- Dynamic Added Options List -->
+        <div class="options-list-wrapper">
+          <div class="options-list-header">
+            <span>已加入的選項清單（至少需新增 1 項）：</span>
+            <span class="options-counter" id="optionsCounter">0 個選項</span>
+          </div>
+          <div class="options-list" id="optionsListContainer">
+            <!-- Dynamic Options will be rendered here -->
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" id="btnStep2Prev">← 上一步</button>
+          <button type="button" class="btn-create-hero" id="btnStep2Next">
+            <span class="btn-text">下一步：確認建立 →</span>
+            <span class="btn-glow"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: 確認建立 -->
+      <div class="step-panel" id="stepPanel3" style="display: none;">
+        <div class="review-lock-alert">
+          <span class="alert-icon">🔒</span>
+          <div class="alert-content">
+            <strong>重要規則提醒：</strong>
+            <p>活動一旦建立完成後，<strong>不能修改活動內容</strong>（建立人、標題、封面、截止日期與已建立選項皆為唯讀）。請確認以下資料無誤：</p>
+          </div>
+        </div>
+
+        <!-- Summary Preview Card -->
+        <div class="review-summary-card glass-panel">
+          <div class="review-cover-wrap">
+            <img id="reviewCoverImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E" alt="活動封面預覽" class="review-cover-img">
+            <div class="review-status-tag">🟢 選擇進行中</div>
+          </div>
+          <div class="review-body">
+            <h3 class="review-title" id="reviewTitle">活動標題</h3>
+            <div class="review-meta-row">
+              <div class="meta-block">
+                <span class="meta-label">建立人</span>
+                <span class="meta-val" id="reviewCreator">冠宏</span>
+              </div>
+              <div class="meta-block">
+                <span class="meta-label">截止日期</span>
+                <span class="meta-val" id="reviewDeadline">2026/09/30 23:59</span>
+              </div>
+            </div>
+
+            <div class="review-options-wrap">
+              <span class="meta-label">活動選項清單：</span>
+              <div class="review-options-chips" id="reviewOptionsChips">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" id="btnStep3Prev">← 上一步修改</button>
+          <button type="button" class="btn-create-hero btn-final-create" id="btnFinalCreate">
+            <span class="btn-text">建立活動 ✨</span>
+            <span class="btn-glow"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Modal: 查看活動與選擇功能 (Activity Detail & Selection) ================= -->
+  <div class="modal-overlay" id="viewActivityModal" aria-hidden="true">
+    <div class="modal-dialog glass-panel activity-view-dialog" role="dialog" aria-modal="true" aria-labelledby="viewModalTitle">
+      <button class="modal-close-btn" id="viewModalCloseBtn" aria-label="關閉視窗">✕</button>
+
+      <!-- Aspect-ratio Cover Frame -->
+      <div class="activity-view-cover-frame">
+        <img id="viewActivityCover" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E" alt="活動封面" class="activity-view-cover-img">
+        <div class="view-status-pill" id="viewActivityStatusBadge">🟢 選擇進行中</div>
+        <div class="readonly-badge">🔒 唯讀存檔 · 內容不可變更</div>
+      </div>
+
+      <div class="activity-view-body">
+        <!-- Header Metadata -->
+        <div class="view-header-meta">
+          <span class="view-creator-tag" id="viewActivityCreator">👑 發起人：冠宏</span>
+          <span class="view-deadline-tag" id="viewActivityDeadline">📅 截止時間：--</span>
+        </div>
+
+        <h2 class="view-activity-title" id="viewModalTitle">活動標題</h2>
+
+        <!-- Action & Tally Bar -->
+        <div class="view-action-bar">
+          <div class="voters-summary-tag" id="viewActivityVotersSummary">
+            <span class="gold-dot"></span>
+            <span id="votersSummaryText">目前共 0 位好友已參與選擇</span>
+          </div>
+          <button type="button" class="btn-vote-trigger" id="btnToggleVoteForm">
+            <span class="btn-icon">＋</span>
+            <span>我要參與選擇</span>
+          </button>
+        </div>
+
+        <!-- Expired Notice Banner (Displayed when activity deadline has passed) -->
+        <div class="expired-activity-banner" id="expiredActivityBanner" style="display: none;">
+          <div class="expired-banner-icon">🔒</div>
+          <div class="expired-banner-content">
+            <h4 class="expired-banner-title">本活動選擇已截止</h4>
+            <p class="expired-banner-text">時間已到，活動選擇已結束。所有選項與好友選擇名單完整永久封存留念。</p>
+          </div>
+        </div>
+
+        <!-- Voting / Selection Form Section -->
+        <div class="vote-form-section" id="voteFormSection">
+          <div class="vote-form-header">
+            <div class="vote-form-title-wrap">
+              <span class="gold-dot"></span>
+              <h3 class="vote-form-title">📝 選擇我的活動偏好</h3>
+            </div>
+            <span class="vote-form-tip">選擇後所有人皆可查看</span>
+          </div>
+
+          <!-- Name Input -->
+          <div class="form-group">
+            <label for="voterNameInput">請輸入你的姓名 <span class="required">*</span></label>
+            <input type="text" id="voterNameInput" class="form-input" placeholder="例如：小明、萱萱、阿偉..." maxlength="20">
+          </div>
+
+          <!-- Multi-select Checkboxes -->
+          <div class="voter-checkboxes-wrapper">
+            <label class="checkbox-group-label">請勾選你想參加的項目（可複選一個或多個）：<span class="required">*</span></label>
+            <div class="voter-checkbox-list" id="voterCheckboxList">
+              <!-- Dynamically rendered via script.js -->
+            </div>
+          </div>
+
+          <!-- Feedback / Alert Message -->
+          <div id="voteFeedbackMsg" class="vote-feedback" style="display: none;"></div>
+
+          <!-- Submit Button -->
+          <div class="vote-form-actions">
+            <button type="button" class="btn-create-hero btn-submit-vote" id="btnSubmitVote">
+              <span class="btn-icon">✓</span>
+              <span class="btn-text">送出我的選擇</span>
+              <span class="btn-glow"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Real-time Options & Friends Choices Board -->
+        <div class="view-options-section">
+          <div class="view-section-title">
+            <div class="title-with-badge">
+              <span>📌 活動選項與選擇名單</span>
+              <span class="options-count-badge" id="viewActivityOptionsCount">0 個選項</span>
+            </div>
+            <span class="realtime-badge">即時連線更新</span>
+          </div>
+
+          <div class="view-options-voters-list" id="viewActivityOptionsContainer">
+            <!-- Dynamically populated via script.js: Option name, voter count, voter name badges -->
+          </div>
+        </div>
+
+        <!-- Activity Chatroom Section (💬 活動聊天室) -->
+        <div class="view-chat-section" id="activityChatSection">
+          <div class="view-section-title chat-section-title-wrap">
+            <div class="title-with-badge">
+              <span>💬 活動聊天室</span>
+              <span class="chat-count-badge" id="chatMessageCountBadge">0 則訊息</span>
+            </div>
+            <p class="chat-section-desc">讓朋友可以在活動裡聊天討論行程與細節</p>
+          </div>
+
+          <!-- Active Chat Identity Bar -->
+          <div class="chat-identity-bar" id="chatIdentityBar">
+            <div class="chat-identity-info">
+              <span class="identity-dot"></span>
+              <span class="identity-label">目前發言身份：</span>
+              <strong class="identity-name" id="currentChatUserDisplay">未設定</strong>
+            </div>
+            <button type="button" class="btn-switch-identity" id="btnSwitchChatIdentity" title="切換或修改發言姓名">
+              <span>切換姓名</span>
+            </button>
+          </div>
+
+          <!-- Chat Messages Stream (Bubble Chat) -->
+          <div class="chat-stream-container" id="chatStreamContainer" role="log" aria-live="polite">
+            <!-- Dynamically rendered via script.js -->
+          </div>
+
+          <!-- Fixed Bottom Chat Input Bar -->
+          <div class="chat-input-wrapper">
+            <form class="chat-input-form" id="chatInputForm" onsubmit="return false;">
+              <input 
+                type="text" 
+                id="chatTextInput" 
+                class="chat-text-input" 
+                placeholder="輸入訊息……" 
+                maxlength="200" 
+                autocomplete="off"
+              >
+              <button type="submit" class="btn-send-message" id="btnSendMessage" aria-label="發送訊息" title="發送訊息 (Enter)">
+                <span class="send-text">發送</span>
+                <span class="send-icon">➤</span>
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Activity Memories & Photos Section (📸 活動回憶) -->
+        <div class="view-photos-section" id="activityPhotosSection">
+          <div class="photos-section-header">
+            <div class="photos-title-wrap">
+              <div class="title-with-badge">
+                <span>📸 活動回憶照片</span>
+                <span class="photos-count-badge" id="photosCountBadge">0 張照片</span>
+              </div>
+              <p class="photos-section-desc" id="photosSectionDesc">活動結束後的美好回憶封存，可隨時上傳與下載朋友間的精彩照片</p>
+            </div>
+            <div class="photos-header-actions" id="photosHeaderActions">
+              <label class="btn-upload-photos" for="photoFileInput" id="btnUploadPhotosLabel">
+                <span class="btn-icon">＋</span>
+                <span class="btn-text">上傳活動照片</span>
+              </label>
+              <input 
+                type="file" 
+                id="photoFileInput" 
+                accept="image/jpeg, image/png, image/webp" 
+                multiple 
+                class="hidden-file-input"
+                style="display: none;"
+              >
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div class="photos-empty-state" id="photosEmptyState" style="display: none;">
+            <div class="photos-empty-icon">📷</div>
+            <p class="photos-empty-title">目前尚未上傳活動照片</p>
+            <p class="photos-empty-desc">點擊「＋ 上傳活動照片」與朋友一同分享這次聚會的美好瞬間！</p>
+          </div>
+
+          <!-- Responsive Photo Gallery Grid (2~4 columns) -->
+          <div class="photos-gallery-grid" id="photosGalleryGrid">
+            <!-- Dynamically populated via script.js -->
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="view-modal-footer">
+          <button type="button" class="btn-explore-glass" id="btnCloseViewModal">關閉視窗</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat Identity Modal (首次發言輸入姓名或切換姓名) -->
+  <div class="modal-overlay" id="chatNameModal" aria-hidden="true" role="dialog" aria-labelledby="chatNameModalTitle">
+    <div class="modal-dialog chat-name-modal-dialog">
+      <button type="button" class="modal-close-btn" id="btnCloseChatNameModal" aria-label="關閉視窗">✕</button>
+      <div class="chat-name-modal-content">
+        <div class="chat-name-modal-header">
+          <div class="gold-icon-circle">👤</div>
+          <h3 class="chat-name-modal-title" id="chatNameModalTitle">設定聊天發言姓名</h3>
+          <p class="chat-name-modal-desc">第一次發言請輸入你的姓名，朋友將會看到你的發言名稱。</p>
+        </div>
+        <form class="chat-name-form" id="chatNameForm" onsubmit="return false;">
+          <div class="form-group">
+            <label for="chatUserNameInput">你的姓名 <span class="required">*</span></label>
+            <input 
+              type="text" 
+              id="chatUserNameInput" 
+              class="form-input" 
+              placeholder="例如：冠宏、小明、萱萱..." 
+              maxlength="20"
+              autocomplete="off"
+            >
+          </div>
+          <div class="chat-name-actions">
+            <button type="button" class="btn-cancel-glass" id="btnCancelChatName">取消</button>
+            <button type="submit" class="btn-create-hero btn-confirm-chat-name" id="btnConfirmChatName">
+              <span>確認身份</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Photo Lightbox Modal (📸 照片檢視器：上一張、下一張、下載、滑動) -->
+  <div class="lightbox-overlay" id="photoLightboxModal" aria-hidden="true" role="dialog" aria-label="活動照片檢視器">
+    <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+    
+    <div class="lightbox-toolbar">
+      <div class="lightbox-meta">
+        <span class="lightbox-index" id="lightboxIndex">1 / 1</span>
+        <span class="lightbox-caption" id="lightboxCaption">活動照片</span>
+      </div>
+      <div class="lightbox-actions">
+        <button type="button" class="lightbox-btn btn-download-photo" id="btnDownloadCurrentPhoto" title="下載此照片">
+          <span class="btn-icon">📥</span>
+          <span class="btn-text">下載照片</span>
+        </button>
+        <button type="button" class="lightbox-btn btn-close-lightbox" id="btnCloseLightbox" title="關閉檢視器 (Esc)">✕</button>
+      </div>
+    </div>
+
+    <!-- Navigation Arrows -->
+    <button type="button" class="lightbox-nav-btn prev" id="btnLightboxPrev" aria-label="上一張照片" title="上一張 (←)">
+      <span>‹</span>
+    </button>
+    <button type="button" class="lightbox-nav-btn next" id="btnLightboxNext" aria-label="下一張照片" title="下一張 (→)">
+      <span>›</span>
+    </button>
+
+    <!-- Image Stage -->
+    <div class="lightbox-stage" id="lightboxStage">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E" alt="活動照片預覽" class="lightbox-img" id="lightboxImg">
+    </div>
+  </div>
+
+  <!-- ================= Modal: 雲端資料庫連線與設定 ================= -->
+  <div class="modal-overlay" id="cloudConfigModal" aria-hidden="true">
+    <div class="modal-dialog glass-panel" style="max-width: 520px;" role="dialog" aria-modal="true" aria-labelledby="cloudModalTitle">
+      <button class="modal-close-btn" id="btnCloudModalClose" aria-label="關閉視窗">✕</button>
+      <div class="modal-header">
+        <div class="step-badge-tag">
+          <span class="gold-dot"></span>
+          <span>DATABASE CONFIGURATION</span>
+        </div>
+        <h2 class="modal-title" id="cloudModalTitle" style="font-size: 1.35rem; margin-top: 6px;">☁️ Supabase 雲端資料庫狀態</h2>
+      </div>
+      <div class="modal-body" style="padding-top: 10px;">
+        <div class="cloud-config-tip">
+          <strong>多人共用活動資料運作機制：</strong><br>
+          • 優先自動透過 Netlify Functions 讀取您在 Netlify 後台填入的 <code>SUPABASE_URL</code> 與 <code>SUPABASE_ANON_KEY</code>。<br>
+          • 本地測試或需要即時覆蓋時，亦可直接於下方填入 Supabase 連線金鑰並儲存。
+        </div>
+
+        <div id="cloudStatusDetail" style="margin-bottom: 16px; padding: 12px 14px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.84rem; line-height: 1.6; color: #FFFFFF; border: 1px solid var(--glass-border);">
+          載入狀態中...
+        </div>
+
+        <div class="cloud-config-field">
+          <label for="cfgSupabaseUrl">Supabase Project URL</label>
+          <input type="text" id="cfgSupabaseUrl" placeholder="https://your-project.supabase.co">
+        </div>
+
+        <div class="cloud-config-field">
+          <label for="cfgSupabaseAnonKey">Supabase Anon Key (公開金鑰)</label>
+          <input type="text" id="cfgSupabaseAnonKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+          <button type="button" class="btn-step-prev" id="btnCloudModalCancel">關閉</button>
+          <button type="button" class="btn-step-next" id="btnSaveCloudConfig">儲存並測試連線</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast-notification" id="toastNotification" aria-live="polite">
+    <div class="toast-icon">✨</div>
+    <div class="toast-message" id="toastMessage">聚會活動已成功建立！</div>
+  </div>
+
+  <!-- Supabase JS Client CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Scripts -->
+  <script src="script.js"></script>
+</body>
+</html>
