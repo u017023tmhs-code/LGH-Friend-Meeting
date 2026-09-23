@@ -609,7 +609,7 @@ function initGatheringsManager() {
   }
 
   if (btnFinalCreate) {
-    btnFinalCreate.addEventListener('click', () => {
+    btnFinalCreate.addEventListener('click', async () => {
       const title = titleInput.value.trim();
       const creator = creatorInput.value.trim();
       const deadlineVal = deadlineInput.value;
@@ -626,22 +626,50 @@ function initGatheringsManager() {
         isReadOnly: true // Immutable as requested
       };
 
-      activities.unshift(newActivity);
-      saveActivities(activities);
+      // 防止重複點擊，切換按鈕狀態
+      const originalBtnText = btnFinalCreate.textContent;
+      btnFinalCreate.disabled = true;
+      btnFinalCreate.textContent = '雲端同步發布中...';
 
-      renderGatheringCards();
+      try {
+        // 先嘗試寫入 Supabase 雲端資料庫
+        const cloudResult = await syncNewActivityToCloud(newActivity);
 
-      // 雲端資料庫即時同步（寫入 Supabase）
-      syncNewActivityToCloud(newActivity);
+        if (cloudResult && cloudResult.success) {
+          // 只有在 INSERT 成功時：
+          // 1. 才寫入記憶體與本機 localStorage 快取
+          if (!activities.some(a => a.id === newActivity.id)) {
+            activities.unshift(newActivity);
+            saveActivities(activities);
+          }
 
-      closeCreateModal();
-      showToast(`✨「${title}」已成功建立並發布在『正在揪團』！`);
+          // 2. 才更新畫面
+          renderGatheringCards();
 
-      const gatheringSection = document.getElementById('gatherings');
-      if (gatheringSection) {
-        setTimeout(() => {
-          gatheringSection.scrollIntoView({ behavior: 'smooth' });
-        }, 200);
+          // 3. 才關閉建立視窗
+          closeCreateModal();
+
+          // 4. 才顯示建立成功提示
+          showToast(`✨「${title}」已成功發布至雲端資料庫！所有好友皆可看見！`);
+
+          const gatheringSection = document.getElementById('gatherings');
+          if (gatheringSection) {
+            setTimeout(() => {
+              gatheringSection.scrollIntoView({ behavior: 'smooth' });
+            }, 200);
+          }
+        } else {
+          // 寫入失敗：不要假裝成功、不要關閉視窗、保留使用者已輸入內容
+          const errMsg = cloudResult?.error?.message || '雲端資料庫連線失敗或尚未就緒';
+          console.error('發布活動至 Supabase 失敗:', cloudResult?.error || errMsg);
+          showToast(`⚠️ 發布失敗：${errMsg}。內容已保留，請重試。`);
+        }
+      } catch (err) {
+        console.error('發布活動時發生未預期錯誤:', err);
+        showToast('⚠️ 發布時發生異常，內容已保留，請稍後再試。');
+      } finally {
+        btnFinalCreate.disabled = false;
+        btnFinalCreate.textContent = originalBtnText;
       }
     });
   }
@@ -1009,7 +1037,7 @@ function initGatheringsManager() {
 
   /* ------------------- Handle Vote Submission ------------------- */
   if (btnSubmitVote) {
-    btnSubmitVote.addEventListener('click', () => {
+    btnSubmitVote.addEventListener('click', async () => {
       if (!currentViewingActivityId) return;
 
       const act = activities.find(a => a.id === currentViewingActivityId);
@@ -1065,48 +1093,71 @@ function initGatheringsManager() {
           userName: voterName,
           createdAt: nowIso
         };
-        selections.push(voteItem);
         newlyAddedVotes.push(voteItem);
       });
 
-      // Save to localStorage
-      saveSelections(selections);
+      // 防止重複點擊
+      const originalSubmitText = btnSubmitVote.textContent;
+      btnSubmitVote.disabled = true;
+      btnSubmitVote.textContent = '雲端同步送出中...';
 
-      // 同步寫入雲端資料庫
-      syncNewSelectionsToCloud(newlyAddedVotes);
-
-      // Show success message: ✅ 選擇完成！ 小明已完成選擇。
-      showVoteFeedback('success', `✅ 選擇完成！<br><strong>${escapeHTML(voterName)}</strong> 已完成選擇。`);
-      showToast(`✅ 選擇完成！${voterName} 已完成選擇。`);
-
-      // Refresh real-time options and voter names
-      renderDetailOptionsAndVoters(act);
-
-      // If user provided a name and currentChatUser is default or empty, adopt it
-      if (voterName && (!localStorage.getItem(STORAGE_KEY_CHAT_USER) || currentChatUser === '冠宏')) {
-        currentChatUser = voterName;
-        saveChatUser(currentChatUser);
-        if (currentChatUserDisplay) {
-          currentChatUserDisplay.textContent = currentChatUser;
+      try {
+        // 若雲端已連線，嘗試寫入 Supabase selections
+        if (supabaseClient && isSupabaseReady) {
+          const cloudRes = await syncNewSelectionsToCloud(newlyAddedVotes);
+          if (!cloudRes || !cloudRes.success) {
+            const errMsg = cloudRes?.error?.message || '雲端資料庫寫入失敗';
+            console.error('投票寫入 Supabase 失敗:', cloudRes?.error || errMsg);
+            showVoteFeedback('error', `⚠️ 投票送出失敗：${errMsg}。請稍後重試。`);
+            showToast('⚠️ 投票同步失敗，請重試');
+            return;
+          }
         }
-        renderActivityChat(act.id);
+
+        // 成功後加入本地記憶體與快取
+        newlyAddedVotes.forEach(v => selections.push(v));
+        saveSelections(selections);
+
+        // Show success message: ✅ 選擇完成！ 小明已完成選擇。
+        showVoteFeedback('success', `✅ 選擇完成！<br><strong>${escapeHTML(voterName)}</strong> 已完成選擇。`);
+        showToast(`✅ 選擇完成！${voterName} 已完成選擇。`);
+
+        // Refresh real-time options and voter names
+        renderDetailOptionsAndVoters(act);
+
+        // If user provided a name and currentChatUser is default or empty, adopt it
+        if (voterName && (!localStorage.getItem(STORAGE_KEY_CHAT_USER) || currentChatUser === '冠宏')) {
+          currentChatUser = voterName;
+          saveChatUser(currentChatUser);
+          if (currentChatUserDisplay) {
+            currentChatUserDisplay.textContent = currentChatUser;
+          }
+          renderActivityChat(act.id);
+        }
+
+        // Refresh home page activity cards as well
+        renderGatheringCards();
+
+        // Clear selection inputs after brief delay
+        setTimeout(() => {
+          if (voterNameInput) voterNameInput.value = '';
+          if (voterCheckboxList) {
+            const cards = voterCheckboxList.querySelectorAll('.voter-checkbox-card');
+            cards.forEach(c => {
+              c.classList.remove('selected');
+              const ind = c.querySelector('.custom-checkbox-indicator');
+              if (ind) ind.textContent = '';
+            });
+          }
+        }, 2500);
+
+      } catch (voteErr) {
+        console.error('送出選擇時發生異常:', voteErr);
+        showVoteFeedback('error', '⚠️ 送出時發生異常，請稍後重試。');
+      } finally {
+        btnSubmitVote.disabled = false;
+        btnSubmitVote.textContent = originalSubmitText;
       }
-
-      // Refresh home page activity cards as well
-      renderGatheringCards();
-
-      // Clear selection inputs after brief delay
-      setTimeout(() => {
-        if (voterNameInput) voterNameInput.value = '';
-        if (voterCheckboxList) {
-          const cards = voterCheckboxList.querySelectorAll('.voter-checkbox-card');
-          cards.forEach(c => {
-            c.classList.remove('selected');
-            const ind = c.querySelector('.custom-checkbox-indicator');
-            if (ind) ind.textContent = '';
-          });
-        }
-      }, 2500);
     });
   }
 
@@ -2287,11 +2338,31 @@ async function fetchActivitiesFromCloud() {
 
     if (error) {
       console.error('讀取雲端活動失敗:', error);
+      updateCloudStatusBadge(false, '連線異常: ' + (error.message || '讀取失敗'));
       return;
     }
 
-    if (data && data.length > 0) {
-      const cloudList = data.map(row => ({
+    const cloudData = data || [];
+    const existingCloudIds = new Set(cloudData.map(row => row.id));
+
+    // 安全單向遷移：將本地已存在的自訂活動 (以 lgh_act_ 開頭) 補同步至雲端（絕不使用 upsert、UPDATE、DELETE）
+    await migrateLocalActivitiesToCloud(existingCloudIds);
+
+    // 重新拉取以確保包含剛遷移的最新活動
+    let finalRows = cloudData;
+    if (existingCloudIds.size > cloudData.length) {
+      const refetched = await supabaseClient
+        .from('activities')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!refetched.error && refetched.data) {
+        finalRows = refetched.data;
+      }
+    }
+
+    if (finalRows && finalRows.length > 0) {
+      // 明確將 Supabase snake_case 轉換為 JavaScript 原生的 camelCase
+      const cloudList = finalRows.map(row => ({
         id: row.id,
         title: row.title,
         creator: row.creator,
@@ -2304,47 +2375,49 @@ async function fetchActivitiesFromCloud() {
         isReadOnly: row.is_read_only ?? true
       }));
 
+      // 更新前端狀態與本機快取
       if (cloudSyncCallbacks.onActivitiesSync) {
         cloudSyncCallbacks.onActivitiesSync(cloudList);
       }
-    } else if (data && data.length === 0) {
-      // 雲端資料表為空時，自動將初始活動寫入雲端，讓所有人立刻看到相同的起始活動
-      await seedActivitiesToCloud();
     }
   } catch (err) {
-    console.error('fetchActivitiesFromCloud 例外:', err);
+    console.error('fetchActivitiesFromCloud 例外錯誤:', err);
   }
 }
 
-// 將新建立的活動寫入 Supabase 雲端資料庫
+// 將新建立的活動寫入 Supabase 雲端資料庫（嚴格使用 INSERT，不使用 upsert）
 async function syncNewActivityToCloud(newActivity) {
   if (!supabaseClient || !isSupabaseReady) {
-    console.log('ℹ️ 目前尚未連線雲端資料庫，活動僅儲存在本機 localStorage。');
-    return;
+    console.warn('⚠️ 目前尚未連線雲端資料庫，無法寫入 Supabase。');
+    return { success: false, error: new Error('目前未連線至 Supabase 雲端資料庫') };
   }
 
   try {
-    const { error } = await supabaseClient.from('activities').insert([{
+    // 明確將 JavaScript camelCase 轉換為 Supabase snake_case
+    const dbRow = {
       id: newActivity.id,
       title: newActivity.title,
       creator: newActivity.creator,
-      cover: newActivity.cover,
+      cover: newActivity.cover || '',
       deadline: newActivity.deadline,
       options: newActivity.options,
       created_at: newActivity.createdAt,
       is_read_only: newActivity.isReadOnly
-    }]);
+    };
+
+    const { error } = await supabaseClient.from('activities').insert([dbRow]);
 
     if (error) {
       console.error('活動寫入 Supabase 失敗:', error);
-      showToast('⚠️ 雲端資料庫寫入警示：' + error.message);
+      return { success: false, error };
     } else {
-      console.log('✅ 活動已成功同步至 Supabase 雲端資料庫！');
-      showToast(`✨「${newActivity.title}」已同步至雲端資料庫，所有好友均可看見！`);
+      console.log('✅ 活動已成功寫入 Supabase 雲端資料庫！');
       fetchActivitiesFromCloud();
+      return { success: true };
     }
   } catch (err) {
-    console.error('syncNewActivityToCloud 錯誤:', err);
+    console.error('syncNewActivityToCloud 例外錯誤:', err);
+    return { success: false, error: err };
   }
 }
 
@@ -2359,11 +2432,12 @@ async function fetchSelectionsFromCloud() {
       .order('created_at', { ascending: true });
 
     if (error) {
-      console.warn('讀取雲端投票紀錄:', error.message);
+      console.warn('讀取雲端投票紀錄失敗:', error.message);
       return;
     }
 
     if (data && data.length > 0) {
+      // 明確將 Supabase snake_case 轉換為 JavaScript 原生的 camelCase
       const cloudSelections = data.map(row => ({
         id: row.id,
         activityId: row.activity_id || row.activityId,
@@ -2377,15 +2451,19 @@ async function fetchSelectionsFromCloud() {
       }
     }
   } catch (err) {
-    console.error('fetchSelectionsFromCloud 例外:', err);
+    console.error('fetchSelectionsFromCloud 例外錯誤:', err);
   }
 }
 
-// 將好友投票同步至 Supabase
+// 將好友投票同步至 Supabase（嚴格使用 INSERT，不使用 upsert/UPDATE/DELETE）
 async function syncNewSelectionsToCloud(newRows) {
-  if (!supabaseClient || !isSupabaseReady) return;
+  if (!supabaseClient || !isSupabaseReady) {
+    console.warn('⚠️ 目前尚未連線雲端資料庫，投票僅保存在本機快取。');
+    return { success: false, error: new Error('目前未連線至雲端資料庫') };
+  }
 
   try {
+    // 明確將 JavaScript camelCase 轉換為 Supabase snake_case
     const dbRows = newRows.map(s => ({
       id: s.id,
       activity_id: s.activityId,
@@ -2396,35 +2474,63 @@ async function syncNewSelectionsToCloud(newRows) {
 
     const { error } = await supabaseClient.from('selections').insert(dbRows);
     if (error) {
-      console.warn('投票同步至雲端失敗:', error.message);
+      console.error('投票同步至雲端失敗:', error);
+      return { success: false, error };
     } else {
-      console.log('✅ 投票已同步至 Supabase 雲端資料庫！');
+      console.log('✅ 投票已成功同步至 Supabase 雲端資料庫！');
       fetchSelectionsFromCloud();
+      return { success: true };
     }
   } catch (err) {
-    console.error('syncNewSelectionsToCloud 例外:', err);
+    console.error('syncNewSelectionsToCloud 例外錯誤:', err);
+    return { success: false, error: err };
   }
 }
 
-// 自動播種初始資料至 Supabase
-async function seedActivitiesToCloud() {
+// 舊活動安全遷移：只遷移 localStorage 中 id 以 lgh_act_ 開頭的活動，絕不 UPDATE、絕不 DELETE、絕不使用 upsert
+async function migrateLocalActivitiesToCloud(existingCloudIds) {
   if (!supabaseClient || !isSupabaseReady) return;
+
   try {
-    const demoList = loadActivities();
-    const rows = demoList.map(a => ({
-      id: a.id,
-      title: a.title,
-      creator: a.creator,
-      cover: a.cover,
-      deadline: a.deadline,
-      options: a.options,
-      created_at: a.createdAt,
-      is_read_only: a.isReadOnly
-    }));
-    await supabaseClient.from('activities').upsert(rows);
-    console.log('🌱 已自動將初始示範活動同步至 Supabase 資料表！');
+    const localList = loadActivities();
+    // 嚴格篩選：只抓取使用者自訂建立之活動（ID 以 lgh_act_ 開頭）
+    const customActivities = localList.filter(a => a && typeof a.id === 'string' && a.id.startsWith('lgh_act_'));
+
+    // 找出雲端尚未存在的活動
+    const pendingToMigrate = customActivities.filter(a => !existingCloudIds.has(a.id));
+
+    if (pendingToMigrate.length === 0) {
+      return;
+    }
+
+    console.log(`📦 檢測到 ${pendingToMigrate.length} 個本機自訂活動尚未同步，正在安全補傳至 Supabase...`);
+
+    for (const act of pendingToMigrate) {
+      try {
+        const row = {
+          id: act.id,
+          title: act.title,
+          creator: act.creator,
+          cover: act.cover || '',
+          deadline: act.deadline,
+          options: act.options || [],
+          created_at: act.createdAt || new Date().toISOString(),
+          is_read_only: act.isReadOnly ?? true
+        };
+
+        const { error } = await supabaseClient.from('activities').insert([row]);
+        if (error) {
+          console.error(`活動 [${act.title}] 安全遷移失敗:`, error.message);
+        } else {
+          console.log(`✅ 活動 [${act.title}] 已安全登錄至雲端資料庫！`);
+          existingCloudIds.add(act.id);
+        }
+      } catch (insertErr) {
+        console.error(`活動 [${act.title}] 遷移過程發生異常:`, insertErr);
+      }
+    }
   } catch (e) {
-    console.warn('自動播種示範資料失敗:', e);
+    console.error('執行舊活動安全遷移時異常:', e);
   }
 }
 
