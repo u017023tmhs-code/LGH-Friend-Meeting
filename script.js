@@ -182,9 +182,10 @@ function initMobileDrawer() {
    3. Gatherings Store & Activity Selection Manager
    ========================================================================== */
 function initGatheringsManager() {
-  // Activity, Selections, and Photos Storage State
+  // Activity, Selections, Messages, and Photos Storage State
   let activities = loadActivities();
   let selections = loadSelections();
+  let messages = loadMessages();
   let photos = loadPhotos();
 
   // 註冊 Supabase 雲端資料庫雙向同步
@@ -206,6 +207,13 @@ function initGatheringsManager() {
         if (act) renderDetailOptionsAndVoters(act);
       }
       renderGatheringCards();
+    },
+    onMessagesSync: (cloudMessages) => {
+      messages = cloudMessages;
+      saveMessages(messages);
+      if (currentViewingActivityId) {
+        renderActivityChat(currentViewingActivityId);
+      }
     }
   });
 
@@ -309,7 +317,6 @@ function initGatheringsManager() {
   const btnConfirmChatName = document.getElementById('btnConfirmChatName');
 
   // Chat State
-  let messages = loadMessages();
   let currentChatUser = loadChatUser();
 
   // Set default deadline to 7 days from now
@@ -888,6 +895,10 @@ function initGatheringsManager() {
     // Render activity chatroom messages (💬 活動聊天室)
     renderActivityChat(act.id);
     if (chatTextInput) chatTextInput.value = '';
+    // 開啟活動時即時向 Supabase 拉取最新聊天訊息
+    if (supabaseClient && isSupabaseReady) {
+      fetchMessagesFromCloud();
+    }
 
     // Render activity memory photos (📸 活動回憶)
     renderActivityPhotos(act.id, isExpired);
@@ -1238,7 +1249,7 @@ function initGatheringsManager() {
     chatStreamContainer.scrollTop = chatStreamContainer.scrollHeight;
   }
 
-  function sendCurrentChatMessage() {
+  async function sendCurrentChatMessage() {
     if (!currentViewingActivityId) return;
 
     // Check if user has set a name
@@ -1264,21 +1275,47 @@ function initGatheringsManager() {
       createdAt: new Date().toISOString()
     };
 
-    messages.push(newMsg);
-    saveMessages(messages);
+    const btnSend = document.querySelector('.btn-send-message');
+    if (btnSend) btnSend.disabled = true;
 
-    if (chatTextInput) {
-      chatTextInput.value = '';
-    }
+    try {
+      if (supabaseClient && isSupabaseReady) {
+        const cloudResult = await syncNewMessageToCloud(newMsg);
 
-    renderActivityChat(currentViewingActivityId);
+        if (cloudResult && cloudResult.success) {
+          // 只有在 INSERT 成功時才更新本地狀態
+          if (!messages.some(m => m.id === newMsg.id)) {
+            messages.push(newMsg);
+            saveMessages(messages);
+          }
 
-    // Scroll to bottom smoothly
-    setTimeout(() => {
-      if (chatStreamContainer) {
-        chatStreamContainer.scrollTop = chatStreamContainer.scrollHeight;
+          if (chatTextInput) {
+            chatTextInput.value = '';
+          }
+
+          renderActivityChat(currentViewingActivityId);
+          showToast('💬 訊息已送出！');
+
+          // Scroll to bottom smoothly
+          setTimeout(() => {
+            if (chatStreamContainer) {
+              chatStreamContainer.scrollTop = chatStreamContainer.scrollHeight;
+            }
+          }, 40);
+        } else {
+          const errMsg = cloudResult?.error?.message || '雲端資料庫寫入失敗';
+          console.error('發送聊天訊息至 Supabase 失敗:', cloudResult?.error || errMsg);
+          showToast(`⚠️ 發送失敗：${errMsg}。內容已保留，請重試。`);
+        }
+      } else {
+        showToast('⚠️ 目前未連線至雲端資料庫，無法送出跨裝置訊息。');
       }
-    }, 40);
+    } catch (err) {
+      console.error('發送聊天訊息異常:', err);
+      showToast('⚠️ 發送時發生異常，請稍後再試。');
+    } finally {
+      if (btnSend) btnSend.disabled = false;
+    }
   }
 
   // Chat Identity Modal Handlers
@@ -2207,7 +2244,8 @@ let supabaseClient = null;
 let isSupabaseReady = false;
 let cloudSyncCallbacks = {
   onActivitiesSync: null,
-  onSelectionsSync: null
+  onSelectionsSync: null,
+  onMessagesSync: null
 };
 
 // 格式化與修正常見 Supabase URL 筆誤（如 znwqlfntqgoopzywhcxx -> znwqlfntqqoopzywhcxx）
@@ -2292,6 +2330,7 @@ async function resolveSupabaseConfig() {
 async function initSupabaseCloudSync(callbacks = {}) {
   if (callbacks.onActivitiesSync) cloudSyncCallbacks.onActivitiesSync = callbacks.onActivitiesSync;
   if (callbacks.onSelectionsSync) cloudSyncCallbacks.onSelectionsSync = callbacks.onSelectionsSync;
+  if (callbacks.onMessagesSync) cloudSyncCallbacks.onMessagesSync = callbacks.onMessagesSync;
 
   initCloudConfigModalUI();
 
@@ -2345,26 +2384,29 @@ async function initSupabaseCloudSync(callbacks = {}) {
     console.log(`⚡ Supabase 雲端資料庫連線成功！來源：[${resolved.source}]`);
     updateCloudStatusBadge(true, '雲端資料庫已連線');
 
-    // 立即從雲端同步活動與投票
+    // 立即從雲端同步活動、投票與聊天訊息
     await fetchActivitiesFromCloud();
     await fetchSelectionsFromCloud();
+    await fetchMessagesFromCloud();
 
     // 訂閱 Realtime 變更（即時跨設備同步）
     setupCloudRealtime();
 
-    // 背景輪詢（每 10 秒自動檢查一次雲端是否有新活動或投票，確保跨設備 100% 同步）
+    // 背景輪詢（每 10 秒自動檢查一次雲端是否有新活動、投票或聊天訊息，確保跨設備 100% 同步）
     setInterval(async () => {
       if (document.visibilityState === 'visible' && isSupabaseReady) {
         await fetchActivitiesFromCloud();
         await fetchSelectionsFromCloud();
+        await fetchMessagesFromCloud();
       }
     }, 10000);
 
-    // 當使用者切換分頁回到網頁時，立即拉取最新活動
+    // 當使用者切換分頁回到網頁時，立即拉取最新活動與聊天訊息
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && isSupabaseReady) {
         fetchActivitiesFromCloud();
         fetchSelectionsFromCloud();
+        fetchMessagesFromCloud();
       }
     });
 
@@ -2582,6 +2624,110 @@ async function migrateLocalActivitiesToCloud(existingCloudIds) {
   }
 }
 
+// 從 Supabase 讀取所有最新聊天訊息
+async function fetchMessagesFromCloud() {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('messages')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.warn('讀取雲端聊天訊息警示:', error.message);
+      return;
+    }
+
+    if (data) {
+      // 安全單向遷移：將本地已存在的自訂聊天訊息補同步至雲端（絕不使用 upsert/UPDATE/DELETE）
+      await migrateLocalMessagesToCloud(data.map(m => m.id));
+
+      const cloudMessages = data.map(row => ({
+        id: row.id,
+        activityId: row.activity_id || row.activityId,
+        userName: row.user_name || row.userName,
+        message: row.message,
+        createdAt: row.created_at || row.createdAt
+      }));
+
+      if (cloudSyncCallbacks.onMessagesSync) {
+        cloudSyncCallbacks.onMessagesSync(cloudMessages);
+      }
+    }
+  } catch (err) {
+    console.error('fetchMessagesFromCloud 例外錯誤:', err);
+  }
+}
+
+// 將新聊天訊息寫入 Supabase 雲端資料庫（嚴格使用 INSERT，不使用 upsert/UPDATE/DELETE）
+async function syncNewMessageToCloud(newMsg) {
+  if (!supabaseClient || !isSupabaseReady) {
+    console.warn('⚠️ 目前尚未連線雲端資料庫，無法發布聊天訊息。');
+    return { success: false, error: new Error('目前未連線至 Supabase 雲端資料庫') };
+  }
+
+  try {
+    const dbRow = {
+      id: newMsg.id,
+      activity_id: newMsg.activityId,
+      user_name: newMsg.userName,
+      message: newMsg.message,
+      created_at: newMsg.createdAt
+    };
+
+    const { error } = await supabaseClient.from('messages').insert([dbRow]);
+    if (error) {
+      console.error('聊天訊息寫入 Supabase 失敗:', error);
+      return { success: false, error };
+    } else {
+      console.log('✅ 聊天訊息已成功寫入 Supabase 雲端資料庫！');
+      fetchMessagesFromCloud();
+      return { success: true };
+    }
+  } catch (err) {
+    console.error('syncNewMessageToCloud 例外錯誤:', err);
+    return { success: false, error: err };
+  }
+}
+
+// 舊聊天訊息安全遷移：只遷移 localStorage 中自訂留言（非 demo 預設留言），絕不 UPDATE、絕不 DELETE、絕不使用 upsert
+async function migrateLocalMessagesToCloud(cloudIdsArray) {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const existingCloudIds = new Set(cloudIdsArray || []);
+    const localList = loadMessages();
+    // 嚴格篩選：只抓取非 demo 預設留言，且雲端尚未存在的訊息
+    const pendingToMigrate = localList.filter(m => m && m.id && !existingCloudIds.has(m.id) && !m.id.startsWith('msg_demo_'));
+
+    if (pendingToMigrate.length === 0) return;
+
+    console.log(`📦 檢測到 ${pendingToMigrate.length} 則本機留言尚未同步，正在安全補傳至 Supabase...`);
+
+    for (const msg of pendingToMigrate) {
+      try {
+        const row = {
+          id: msg.id,
+          activity_id: msg.activityId,
+          user_name: msg.userName,
+          message: msg.message,
+          created_at: msg.createdAt
+        };
+        const { error } = await supabaseClient.from('messages').insert([row]);
+        if (!error) {
+          console.log(`✅ 本機留言 [${msg.id}] 已安全登錄至雲端資料庫！`);
+          existingCloudIds.add(msg.id);
+        }
+      } catch (insertErr) {
+        console.error(`留言 [${msg.id}] 遷移異常:`, insertErr);
+      }
+    }
+  } catch (e) {
+    console.error('執行舊留言安全遷移時異常:', e);
+  }
+}
+
 // 設置 Supabase Realtime 即時推播監聽
 function setupCloudRealtime() {
   if (!supabaseClient) return;
@@ -2595,6 +2741,10 @@ function setupCloudRealtime() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'selections' }, (payload) => {
         console.log('🔔 收到投票即時更新:', payload);
         fetchSelectionsFromCloud();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+        console.log('💬 收到聊天室訊息即時更新:', payload);
+        fetchMessagesFromCloud();
       })
       .subscribe((status) => {
         console.log('📡 Supabase Realtime channel status:', status);
@@ -2706,6 +2856,7 @@ function initCloudConfigModalUI() {
 
         await fetchActivitiesFromCloud();
         await fetchSelectionsFromCloud();
+        await fetchMessagesFromCloud();
       } catch (err) {
         showToast(`❌ 連線失敗：${err.message}`);
         if (statusDetail) {
