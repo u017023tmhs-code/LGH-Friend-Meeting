@@ -2191,6 +2191,12 @@ function escapeHTML(str) {
    ========================================================================== */
 const STORAGE_KEY_SUPABASE_CONFIG = 'LGH_EXCLUSIVE_SUPABASE_CONFIG_V1';
 
+// 預設 Supabase 雲端資料庫連線資訊（供 GitHub Pages 純靜態站點直接連線）
+// 安全保證：僅使用公開 Publishable / Anon Key 與 Project URL，符合 Supabase RLS 安全模型
+// 絕不包含 service_role / secret key / database password / JWT Secret
+const DEFAULT_SUPABASE_URL = 'https://znwqlfntqqoopzywhcxx.supabase.co';
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpud3FsZm50cXFvb3B6eXdoY3h4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2Nzc2NTQsImV4cCI6MjEwNTI1MzY1NH0.9DkK1jMS6BDEVh2wSOBoXnwC5bBOA8jRnyMrXIgzYqU';
+
 // 連線設定與實例狀態
 let supabaseConfig = {
   url: '',
@@ -2204,36 +2210,30 @@ let cloudSyncCallbacks = {
   onSelectionsSync: null
 };
 
-// 取得 Supabase 設定（優先度：1. Netlify Functions 環境變數 -> 2. 本地儲存設定 -> 3. 程式內預設）
-async function resolveSupabaseConfig() {
-  // 1. 嘗試向 Netlify Function 請求後台環境變數
-  try {
-    const res = await fetch('/.netlify/functions/supabase-config', {
-      headers: { 'Cache-Control': 'no-cache' }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.supabaseUrl && data.supabaseAnonKey) {
-        return {
-          url: data.supabaseUrl.trim(),
-          anonKey: data.supabaseAnonKey.trim(),
-          source: 'Netlify 環境變數'
-        };
-      }
-    }
-  } catch (err) {
-    // Netlify Function 不可用（如本地檔案開啟），接續檢查自訂設定
+// 格式化與修正常見 Supabase URL 筆誤（如 znwqlfntqgoopzywhcxx -> znwqlfntqqoopzywhcxx）
+function normalizeSupabaseUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  let trimmed = url.trim().replace(/\/+$/, '');
+  if (trimmed.includes('znwqlfntqgoopzywhcxx')) {
+    trimmed = trimmed.replace('znwqlfntqgoopzywhcxx', 'znwqlfntqqoopzywhcxx');
   }
+  return trimmed;
+}
 
-  // 2. 檢查使用者在網頁或本機設定的 Supabase 連線資訊
+// 取得 Supabase 設定
+// 優先度：1. 本地 localStorage 自訂設定 -> 2. window 全域注入 -> 3. GitHub Pages 預設連線憑證 -> 4. Netlify Functions (回退相容)
+async function resolveSupabaseConfig() {
+  // 1. 檢查使用者在網頁或本機設定的 Supabase 連線資訊 (自訂覆蓋)
   try {
     const saved = localStorage.getItem(STORAGE_KEY_SUPABASE_CONFIG);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed.url && parsed.anonKey) {
+      const url = normalizeSupabaseUrl(parsed.url);
+      const key = (parsed.publishableKey || parsed.anonKey || '').trim();
+      if (url && key) {
         return {
-          url: parsed.url.trim(),
-          anonKey: parsed.anonKey.trim(),
+          url: url,
+          anonKey: key,
           source: '網頁自訂設定'
         };
       }
@@ -2242,13 +2242,47 @@ async function resolveSupabaseConfig() {
     // ignore
   }
 
-  // 3. 檢查 window 全域注入 (若有)
-  if (window.__SUPABASE_URL__ && window.__SUPABASE_ANON_KEY__) {
+  // 2. 檢查 window 全域注入 (若有)
+  const globalUrl = window.__SUPABASE_URL__ || (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.url);
+  const globalKey = window.__SUPABASE_PUBLISHABLE_KEY__ || window.__SUPABASE_ANON_KEY__ || (window.SUPABASE_CONFIG && (window.SUPABASE_CONFIG.publishableKey || window.SUPABASE_CONFIG.anonKey));
+  if (globalUrl && globalKey) {
     return {
-      url: window.__SUPABASE_URL__.trim(),
-      anonKey: window.__SUPABASE_ANON_KEY__.trim(),
+      url: normalizeSupabaseUrl(globalUrl),
+      anonKey: String(globalKey).trim(),
       source: '全域注入'
     };
+  }
+
+  // 3. GitHub Pages 預設直連既有 Supabase Project（所有訪客裝置預設共享）
+  if (DEFAULT_SUPABASE_URL && DEFAULT_SUPABASE_PUBLISHABLE_KEY) {
+    return {
+      url: normalizeSupabaseUrl(DEFAULT_SUPABASE_URL),
+      anonKey: DEFAULT_SUPABASE_PUBLISHABLE_KEY.trim(),
+      source: 'GitHub Pages 預設雲端連線'
+    };
+  }
+
+  // 4. 若處於 Netlify 環境，嘗試向 Netlify Function 請求後台環境變數
+  if (typeof window !== 'undefined' && window.location && window.location.hostname.includes('netlify.app')) {
+    try {
+      const res = await fetch('/.netlify/functions/supabase-config', {
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const url = normalizeSupabaseUrl(data.supabaseUrl);
+        const key = (data.supabasePublishableKey || data.supabaseAnonKey || '').trim();
+        if (url && key) {
+          return {
+            url: url,
+            anonKey: key,
+            source: 'Netlify 環境變數'
+          };
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
   }
 
   return { url: '', anonKey: '', source: '未設定' };
@@ -2267,7 +2301,7 @@ async function initSupabaseCloudSync(callbacks = {}) {
     return;
   }
 
-  const resolved = await resolveSupabaseConfig();
+  let resolved = await resolveSupabaseConfig();
   supabaseConfig.url = resolved.url;
   supabaseConfig.anonKey = resolved.anonKey;
 
@@ -2283,13 +2317,27 @@ async function initSupabaseCloudSync(callbacks = {}) {
     });
 
     // 測試連線並檢查 activities table
-    const { count, error } = await supabaseClient
+    let checkResult = await supabaseClient
       .from('activities')
       .select('*', { count: 'exact', head: true });
 
-    if (error) {
-      console.warn('Supabase 連線警示 (activities 表可能尚未建立):', error.message);
-      updateCloudStatusBadge(false, '連線異常: ' + error.message);
+    // 若自訂設定連線失敗且存在預設設定，自動無縫回退至 GitHub Pages 預設連線
+    if (checkResult.error && resolved.source !== 'GitHub Pages 預設雲端連線' && DEFAULT_SUPABASE_URL && DEFAULT_SUPABASE_PUBLISHABLE_KEY) {
+      console.warn(`自訂設定 [${resolved.source}] 連線異常 (${checkResult.error.message})，自動回退至 GitHub Pages 預設連線...`);
+      supabaseConfig.url = normalizeSupabaseUrl(DEFAULT_SUPABASE_URL);
+      supabaseConfig.anonKey = DEFAULT_SUPABASE_PUBLISHABLE_KEY.trim();
+      supabaseClient = window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+        auth: { persistSession: false }
+      });
+      checkResult = await supabaseClient
+        .from('activities')
+        .select('*', { count: 'exact', head: true });
+      resolved.source = 'GitHub Pages 預設雲端連線 (自動回退)';
+    }
+
+    if (checkResult.error) {
+      console.warn('Supabase 連線警示 (activities 表可能尚未建立):', checkResult.error.message);
+      updateCloudStatusBadge(false, '連線異常: ' + checkResult.error.message);
       return;
     }
 
@@ -2584,23 +2632,23 @@ function initCloudConfigModalUI() {
   function openModal() {
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
-    if (inputUrl) inputUrl.value = supabaseConfig.url || '';
-    if (inputKey) inputKey.value = supabaseConfig.anonKey || '';
+    if (inputUrl) inputUrl.value = supabaseConfig.url || DEFAULT_SUPABASE_URL || '';
+    if (inputKey) inputKey.value = supabaseConfig.anonKey || DEFAULT_SUPABASE_PUBLISHABLE_KEY || '';
     if (statusDetail) {
       if (isSupabaseReady) {
         statusDetail.innerHTML = `
           <div style="color: #4ade80; font-weight: 600; margin-bottom: 6px;">✅ 雲端資料庫已成功連線</div>
-          <div style="color: var(--text-muted); font-size: 0.8rem;">
+          <div style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.6;">
             • 目標 URL: <code style="color: var(--gold-light);">${escapeHTML(supabaseConfig.url)}</code><br>
-            • 目前模式: 多人共同連線同一份雲端資料庫，新增活動或投票將即時跨裝置同步！
+            • 目前模式: 多人共同連線同一份雲端資料庫 (GitHub Pages 跨裝置即時同步已就緒)！新增活動或投票將即時同步至所有好友裝置。
           </div>
         `;
       } else {
         statusDetail.innerHTML = `
           <div style="color: #f59e0b; font-weight: 600; margin-bottom: 6px;">⚠️ 目前尚未連線雲端資料庫</div>
-          <div style="color: var(--text-muted); font-size: 0.8rem;">
+          <div style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.6;">
             • 目前儲存位置：瀏覽器本機 localStorage。<br>
-            • 若已在 Netlify 設定環境變數，請確認變數名稱為 <code>SUPABASE_URL</code> 與 <code>SUPABASE_ANON_KEY</code>，或直接於下方填寫並儲存。
+            • 預設支援 GitHub Pages 直接連線既有 Supabase Project，亦可直接於下方填寫 Publishable Key 並儲存測試。
           </div>
         `;
       }
@@ -2622,11 +2670,12 @@ function initCloudConfigModalUI() {
 
   if (btnSave) {
     btnSave.addEventListener('click', async () => {
-      const url = inputUrl ? inputUrl.value.trim() : '';
+      const rawUrl = inputUrl ? inputUrl.value.trim() : '';
+      const url = normalizeSupabaseUrl(rawUrl);
       const key = inputKey ? inputKey.value.trim() : '';
 
       if (!url || !key) {
-        showToast('⚠️ 請輸入完整的 Supabase URL 與 Anon Key');
+        showToast('⚠️ 請輸入完整的 Supabase URL 與 Publishable Key');
         return;
       }
 
@@ -2644,8 +2693,8 @@ function initCloudConfigModalUI() {
           throw error;
         }
 
-        // 儲存設定
-        localStorage.setItem(STORAGE_KEY_SUPABASE_CONFIG, JSON.stringify({ url, anonKey: key }));
+        // 儲存設定 (同時寫入 anonKey 與 publishableKey 確保相容性)
+        localStorage.setItem(STORAGE_KEY_SUPABASE_CONFIG, JSON.stringify({ url, anonKey: key, publishableKey: key }));
         supabaseConfig.url = url;
         supabaseConfig.anonKey = key;
         supabaseClient = testClient;
