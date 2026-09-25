@@ -214,6 +214,17 @@ function initGatheringsManager() {
       if (currentViewingActivityId) {
         renderActivityChat(currentViewingActivityId);
       }
+    },
+    onPhotosSync: (cloudPhotos) => {
+      photos = cloudPhotos;
+      savePhotos(photos);
+      renderGatheringCards();
+      if (currentViewingActivityId) {
+        const act = activities.find(a => a.id === currentViewingActivityId);
+        const now = new Date();
+        const isExpired = act && !isNaN(new Date(act.deadline).getTime()) && new Date(act.deadline) <= now;
+        renderActivityPhotos(currentViewingActivityId, isExpired);
+      }
     }
   });
 
@@ -1493,7 +1504,7 @@ function initGatheringsManager() {
     });
   }
 
-  // Handle Multi-file Upload (JPG, PNG, WEBP)
+  // Handle Multi-file Upload to Supabase Storage & activity_photos
   if (photoFileInput) {
     photoFileInput.addEventListener('change', async (e) => {
       const files = Array.from(e.target.files);
@@ -1506,28 +1517,88 @@ function initGatheringsManager() {
         return;
       }
 
-      showToast(`⏳ 正在上傳與最佳化 ${validFiles.length} 張照片...`);
+      if (!supabaseClient || !isSupabaseReady) {
+        showToast('⚠️ 尚未連線至 Supabase 雲端資料庫，無法上傳照片');
+        photoFileInput.value = '';
+        return;
+      }
 
-      let count = 0;
+      showToast(`⏳ 正在上傳與最佳化 ${validFiles.length} 張照片至雲端...`);
+
+      let successCount = 0;
+      let failedCount = 0;
+      let lastErrorMsg = '';
+
       for (const file of validFiles) {
         try {
-          const dataUrl = await readFileAndCompress(file);
-          const newPhoto = {
-            id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
-            activityId: currentViewingActivityId,
+          // 1. 圖片客戶端品質最佳化壓縮 (限制長邊 1280px，優質 JPEG Blob)
+          const blob = await compressImageToBlob(file, 1280, 0.82);
+          const photoId = 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          const storagePath = `${currentViewingActivityId}/${photoId}.jpg`;
+
+          // 2. 上傳實際圖片檔案至 Supabase Storage (activity-photos bucket)
+          const { error: uploadError } = await supabaseClient.storage
+            .from('activity-photos')
+            .upload(storagePath, blob, {
+              contentType: 'image/jpeg',
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            throw new Error(`Storage 上傳失敗: ${uploadError.message}`);
+          }
+
+          // 3. 取得公開圖片 URL
+          const { data: pubData } = supabaseClient.storage
+            .from('activity-photos')
+            .getPublicUrl(storagePath);
+
+          const publicUrl = pubData ? pubData.publicUrl : '';
+          if (!publicUrl) {
+            throw new Error('無法取得圖片公開網址');
+          }
+
+          // 4. 寫入 activity_photos metadata 資料表
+          const dbRow = {
+            id: photoId,
+            activity_id: currentViewingActivityId,
             caption: file.name.replace(/\.[^/.]+$/, ''),
-            url: dataUrl,
-            uploadedAt: new Date().toISOString()
+            storage_path: storagePath,
+            public_url: publicUrl,
+            uploaded_at: new Date().toISOString()
+          };
+
+          const { error: insertError } = await supabaseClient
+            .from('activity_photos')
+            .insert([dbRow]);
+
+          if (insertError) {
+            throw new Error(`資料表寫入失敗: ${insertError.message}`);
+          }
+
+          // 只有 Storage 與 activity_photos 皆成功時才計入成功
+          const newPhoto = {
+            id: photoId,
+            activityId: currentViewingActivityId,
+            caption: dbRow.caption,
+            storagePath: storagePath,
+            url: publicUrl,
+            uploadedAt: dbRow.uploaded_at
           };
           photos.push(newPhoto);
-          count++;
+          successCount++;
         } catch (err) {
-          console.error('Photo processing error:', err);
+          console.error('照片上傳失敗:', err);
+          failedCount++;
+          lastErrorMsg = err.message || '連線異常';
         }
       }
 
-      savePhotos(photos);
       photoFileInput.value = '';
+
+      // 儲存照片至本機快取（此時 url 為雲端 publicUrl，不含 Base64）
+      savePhotos(photos);
 
       const act = activities.find(a => a.id === currentViewingActivityId);
       const now = new Date();
@@ -1536,7 +1607,13 @@ function initGatheringsManager() {
       renderActivityPhotos(currentViewingActivityId, isExpired);
       renderGatheringCards();
 
-      showToast(`📸 成功上傳 ${count} 張活動回憶照片！`);
+      if (successCount > 0 && failedCount === 0) {
+        showToast(`📸 成功上傳 ${successCount} 張活動回憶照片！`);
+      } else if (successCount > 0 && failedCount > 0) {
+        showToast(`📸 成功上傳 ${successCount} 張照片（${failedCount} 張失敗：${lastErrorMsg}）`);
+      } else {
+        showToast(`⚠️ 照片上傳失敗：${lastErrorMsg}`);
+      }
     });
   }
 
@@ -1976,8 +2053,8 @@ function generateLuxuryMemoryPhotoSvg(title, subtitle, icon = '📸', themeColor
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-function loadPhotos() {
-  const defaultPhotos = [
+function getDefaultDemoPhotos() {
+  return [
     {
       id: 'p_demo_yl_1',
       activityId: 'demo_yl_3',
@@ -2021,6 +2098,10 @@ function loadPhotos() {
       uploadedAt: '2026-08-20T22:30:00.000Z'
     }
   ];
+}
+
+function loadPhotos() {
+  const defaultPhotos = getDefaultDemoPhotos();
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PHOTOS);
@@ -2034,32 +2115,104 @@ function loadPhotos() {
     console.error('Error loading photos from localStorage:', err);
   }
 
-  savePhotos(defaultPhotos);
   return defaultPhotos;
 }
 
 function savePhotos(list) {
   try {
-    localStorage.setItem(STORAGE_KEY_PHOTOS, JSON.stringify(list));
+    // 嚴格保證：只快取 metadata 與公開 URL，絕不將新照片以 Base64 存入 LocalStorage
+    const sanitized = (list || []).map(p => {
+      return {
+        id: p.id,
+        activityId: p.activityId,
+        caption: p.caption || '',
+        storagePath: p.storagePath || '',
+        url: p.url,
+        uploadedAt: p.uploadedAt
+      };
+    });
+    localStorage.setItem(STORAGE_KEY_PHOTOS, JSON.stringify(sanitized));
   } catch (err) {
-    console.error('Error saving photos to localStorage:', err);
-    showToast('⚠️ 相簿儲存容量受限，建議挑選精彩照片上傳');
+    console.warn('LocalStorage savePhotos warning:', err);
   }
 }
 
-function downloadPhoto(url, filename = 'activity_photo.jpg') {
+async function downloadPhoto(url, filename = 'activity_photo.jpg') {
   try {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      const res = await fetch(url);
+      if (res.ok) {
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        showToast('📥 照片已開始下載！');
+        return;
+      }
+    }
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;
+    link.target = '_blank';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     showToast('📥 照片已開始下載！');
   } catch (e) {
     console.error('Download error:', e);
-    showToast('⚠️ 照片下載失敗，請重試');
+    window.open(url, '_blank');
   }
+}
+
+function compressImageToBlob(file, maxWidth = 1280, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width;
+        let h = img.height;
+        if (w > maxWidth) {
+          h = Math.round((h * maxWidth) / w);
+          w = maxWidth;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('圖片轉換失敗'));
+          }
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = () => reject(new Error('圖片載入失敗'));
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function dataUrlToBlob(dataUrl) {
+  const parts = dataUrl.split(',');
+  const mimeMatch = parts[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
 }
 
 function readFileAndCompress(file) {
@@ -2245,7 +2398,8 @@ let isSupabaseReady = false;
 let cloudSyncCallbacks = {
   onActivitiesSync: null,
   onSelectionsSync: null,
-  onMessagesSync: null
+  onMessagesSync: null,
+  onPhotosSync: null
 };
 
 // 格式化與修正常見 Supabase URL 筆誤（如 znwqlfntqgoopzywhcxx -> znwqlfntqqoopzywhcxx）
@@ -2331,6 +2485,7 @@ async function initSupabaseCloudSync(callbacks = {}) {
   if (callbacks.onActivitiesSync) cloudSyncCallbacks.onActivitiesSync = callbacks.onActivitiesSync;
   if (callbacks.onSelectionsSync) cloudSyncCallbacks.onSelectionsSync = callbacks.onSelectionsSync;
   if (callbacks.onMessagesSync) cloudSyncCallbacks.onMessagesSync = callbacks.onMessagesSync;
+  if (callbacks.onPhotosSync) cloudSyncCallbacks.onPhotosSync = callbacks.onPhotosSync;
 
   initCloudConfigModalUI();
 
@@ -2384,29 +2539,32 @@ async function initSupabaseCloudSync(callbacks = {}) {
     console.log(`⚡ Supabase 雲端資料庫連線成功！來源：[${resolved.source}]`);
     updateCloudStatusBadge(true, '雲端資料庫已連線');
 
-    // 立即從雲端同步活動、投票與聊天訊息
+    // 立即從雲端同步活動、投票、聊天訊息與回憶照片
     await fetchActivitiesFromCloud();
     await fetchSelectionsFromCloud();
     await fetchMessagesFromCloud();
+    await fetchPhotosFromCloud();
 
     // 訂閱 Realtime 變更（即時跨設備同步）
     setupCloudRealtime();
 
-    // 背景輪詢（每 10 秒自動檢查一次雲端是否有新活動、投票或聊天訊息，確保跨設備 100% 同步）
+    // 背景輪詢（每 10 秒自動檢查一次雲端是否有新活動、投票、聊天訊息或回憶照片，確保跨設備 100% 同步）
     setInterval(async () => {
       if (document.visibilityState === 'visible' && isSupabaseReady) {
         await fetchActivitiesFromCloud();
         await fetchSelectionsFromCloud();
         await fetchMessagesFromCloud();
+        await fetchPhotosFromCloud();
       }
     }, 10000);
 
-    // 當使用者切換分頁回到網頁時，立即拉取最新活動與聊天訊息
+    // 當使用者切換分頁回到網頁時，立即拉取最新活動、聊天訊息與回憶照片
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && isSupabaseReady) {
         fetchActivitiesFromCloud();
         fetchSelectionsFromCloud();
         fetchMessagesFromCloud();
+        fetchPhotosFromCloud();
       }
     });
 
@@ -2728,6 +2886,139 @@ async function migrateLocalMessagesToCloud(cloudIdsArray) {
   }
 }
 
+// 從 Supabase 讀取所有最新活動照片
+async function fetchPhotosFromCloud() {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('activity_photos')
+      .select('*')
+      .order('uploaded_at', { ascending: true });
+
+    if (error) {
+      console.warn('讀取雲端活動照片警示:', error.message);
+      return;
+    }
+
+    if (data) {
+      // 安全單向遷移：將本地已存在的自訂照片補同步至 Supabase Storage & activity_photos
+      await migrateLocalPhotosToCloud(data.map(p => p.id));
+
+      const cloudPhotos = data.map(row => ({
+        id: row.id,
+        activityId: row.activity_id || row.activityId,
+        caption: row.caption || '',
+        storagePath: row.storage_path || row.storagePath,
+        url: row.public_url || row.url,
+        uploadedAt: row.uploaded_at || row.uploadedAt
+      }));
+
+      // 合併預設示範照片 (如果尚未存在)
+      const defaultDemos = getDefaultDemoPhotos();
+      const mergedPhotos = [...cloudPhotos];
+      for (const demoP of defaultDemos) {
+        if (!mergedPhotos.some(p => p.id === demoP.id)) {
+          mergedPhotos.push(demoP);
+        }
+      }
+
+      if (cloudSyncCallbacks.onPhotosSync) {
+        cloudSyncCallbacks.onPhotosSync(mergedPhotos);
+      }
+    }
+  } catch (err) {
+    console.error('fetchPhotosFromCloud 例外錯誤:', err);
+  }
+}
+
+// 舊照片安全遷移：只遷移 localStorage 中自訂上傳照片（非 demo 預設照片），絕不 UPDATE、絕不 DELETE、絕不使用 upsert
+async function migrateLocalPhotosToCloud(cloudIdsArray) {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const existingCloudIds = new Set(cloudIdsArray || []);
+    const localList = loadPhotos();
+    // 嚴格篩選：只抓取非 demo 照片、雲端尚未存在、且包含本機 Base64 dataUrl 的照片
+    const pendingToMigrate = localList.filter(p => 
+      p && p.id && 
+      !existingCloudIds.has(p.id) && 
+      !p.id.startsWith('p_demo_') &&
+      typeof p.url === 'string' &&
+      p.url.startsWith('data:image/')
+    );
+
+    if (pendingToMigrate.length === 0) return;
+
+    console.log(`📦 檢測到 ${pendingToMigrate.length} 張本機照片尚未同步至雲端 Storage，正在安全補傳...`);
+
+    let migratedAny = false;
+    for (const photo of pendingToMigrate) {
+      try {
+        const blob = dataUrlToBlob(photo.url);
+        const storagePath = `${photo.activityId}/${photo.id}.jpg`;
+
+        // 1. 上傳實體檔案至 Storage
+        const { error: uploadErr } = await supabaseClient.storage
+          .from('activity-photos')
+          .upload(storagePath, blob, {
+            contentType: 'image/jpeg',
+            upsert: true
+          });
+
+        if (uploadErr) {
+          console.error(`舊照片 [${photo.id}] Storage 上傳失敗:`, uploadErr.message);
+          continue;
+        }
+
+        // 2. 取得 Public URL
+        const { data: pubData } = supabaseClient.storage
+          .from('activity-photos')
+          .getPublicUrl(storagePath);
+        const publicUrl = pubData ? pubData.publicUrl : '';
+
+        if (!publicUrl) {
+          console.error(`舊照片 [${photo.id}] 取得 Public URL 失敗`);
+          continue;
+        }
+
+        // 3. 寫入 activity_photos metadata
+        const row = {
+          id: photo.id,
+          activity_id: photo.activityId,
+          caption: photo.caption || '活動回憶照片',
+          storage_path: storagePath,
+          public_url: publicUrl,
+          uploaded_at: photo.uploadedAt || new Date().toISOString()
+        };
+
+        const { error: insertErr } = await supabaseClient
+          .from('activity_photos')
+          .insert([row]);
+
+        if (!insertErr) {
+          console.log(`✅ 舊照片 [${photo.id}] 已安全遷移至 Supabase Storage 與 activity_photos！`);
+          existingCloudIds.add(photo.id);
+          // 成功後將本機照片的 Base64 替換為 publicUrl，釋放 LocalStorage 空間
+          photo.url = publicUrl;
+          photo.storagePath = storagePath;
+          migratedAny = true;
+        } else {
+          console.error(`舊照片 [${photo.id}] 寫入 metadata 失敗:`, insertErr.message);
+        }
+      } catch (pErr) {
+        console.error(`舊照片 [${photo.id}] 遷移過程異常:`, pErr);
+      }
+    }
+
+    if (migratedAny) {
+      savePhotos(localList);
+    }
+  } catch (e) {
+    console.error('執行舊照片安全遷移時異常:', e);
+  }
+}
+
 // 設置 Supabase Realtime 即時推播監聽
 function setupCloudRealtime() {
   if (!supabaseClient) return;
@@ -2745,6 +3036,10 @@ function setupCloudRealtime() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
         console.log('💬 收到聊天室訊息即時更新:', payload);
         fetchMessagesFromCloud();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_photos' }, (payload) => {
+        console.log('📸 收到相簿照片即時更新:', payload);
+        fetchPhotosFromCloud();
       })
       .subscribe((status) => {
         console.log('📡 Supabase Realtime channel status:', status);
