@@ -23,6 +23,24 @@ const STORAGE_KEY_SELECTIONS = 'LGH_EXCLUSIVE_SELECTIONS_V1';
 const STORAGE_KEY_MESSAGES = 'LGH_EXCLUSIVE_MESSAGES_V1';
 const STORAGE_KEY_CHAT_USER = 'LGH_EXCLUSIVE_CHAT_USER_V1';
 const STORAGE_KEY_PHOTOS = 'LGH_EXCLUSIVE_PHOTOS_V1';
+const STORAGE_KEY_DELETED_ACTIVITIES = 'LGH_EXCLUSIVE_DELETED_ACTIVITIES_V1';
+
+function getDeletedActivityIds() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_DELETED_ACTIVITIES);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function markActivityAsDeleted(activityId) {
+  try {
+    const set = getDeletedActivityIds();
+    set.add(activityId);
+    localStorage.setItem(STORAGE_KEY_DELETED_ACTIVITIES, JSON.stringify([...set]));
+  } catch (e) {}
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   initAmbientParticles();
@@ -191,12 +209,20 @@ function initGatheringsManager() {
   // 註冊 Supabase 雲端資料庫雙向同步
   initSupabaseCloudSync({
     onActivitiesSync: (cloudActivities) => {
-      activities = cloudActivities;
+      const deletedIds = getDeletedActivityIds();
+      activities = cloudActivities.filter(a => !deletedIds.has(a.id));
       saveActivities(activities);
       renderGatheringCards();
       if (currentViewingActivityId) {
         const act = activities.find(a => a.id === currentViewingActivityId);
-        if (act) renderDetailOptionsAndVoters(act);
+        if (act) {
+          renderDetailOptionsAndVoters(act);
+        } else {
+          // 目前檢視之活動已被其他裝置或本人刪除
+          if (typeof closeDeleteModal === 'function') closeDeleteModal();
+          if (typeof closeViewModal === 'function') closeViewModal();
+          showToast('ℹ️ 目前檢視的活動已自雲端資料庫刪除');
+        }
       }
     },
     onSelectionsSync: (cloudSelections) => {
@@ -258,6 +284,21 @@ function initGatheringsManager() {
   const coverPreviewImg = document.getElementById('coverPreviewImg');
   const btnRemoveCover = document.getElementById('btnRemoveCover');
   const deadlineInput = document.getElementById('deadlineInput');
+  const deletePasswordInput = document.getElementById('deletePasswordInput');
+  const confirmDeletePasswordInput = document.getElementById('confirmDeletePasswordInput');
+
+  // Delete Activity Modal Elements (🗑️ 活動刪除)
+  const btnOpenDeleteModal = document.getElementById('btnOpenDeleteModal');
+  const deleteActivityModal = document.getElementById('deleteActivityModal');
+  const btnCloseDeleteModal = document.getElementById('btnCloseDeleteModal');
+  const btnCancelDelete = document.getElementById('btnCancelDelete');
+  const btnConfirmDeleteActivity = document.getElementById('btnConfirmDeleteActivity');
+  const deleteActivityForm = document.getElementById('deleteActivityForm');
+  const inputDeletePassword = document.getElementById('inputDeletePassword');
+  const deletePasswordGroup = document.getElementById('deletePasswordGroup');
+  const legacySetPasswordGroup = document.getElementById('legacySetPasswordGroup');
+  const inputLegacyNewPassword = document.getElementById('inputLegacyNewPassword');
+  const inputLegacyConfirmPassword = document.getElementById('inputLegacyConfirmPassword');
 
   // Step Indicators & Panels
   const stepPanels = [
@@ -401,6 +442,8 @@ function initGatheringsManager() {
     goToStep(1);
     if (titleInput) titleInput.value = '';
     if (creatorInput) creatorInput.value = '冠宏';
+    if (deletePasswordInput) deletePasswordInput.value = '';
+    if (confirmDeletePasswordInput) confirmDeletePasswordInput.value = '';
     setDefaultDeadlineInput();
     clearCoverUpload();
     currentOptions = [];
@@ -486,6 +529,8 @@ function initGatheringsManager() {
       const creator = creatorInput.value.trim();
       const title = titleInput.value.trim();
       const deadline = deadlineInput.value;
+      const deletePassword = deletePasswordInput ? deletePasswordInput.value : '';
+      const confirmDeletePassword = confirmDeletePasswordInput ? confirmDeletePasswordInput.value : '';
 
       if (!creator) {
         showToast('⚠️ 請輸入建立人姓名（例如：冠宏）');
@@ -502,6 +547,24 @@ function initGatheringsManager() {
       if (!deadline) {
         showToast('⚠️ 請選擇活動截止日期與時間');
         deadlineInput.focus();
+        return;
+      }
+
+      if (!deletePassword) {
+        showToast('⚠️ 請設定活動刪除密碼（用於日後刪除此活動）');
+        if (deletePasswordInput) deletePasswordInput.focus();
+        return;
+      }
+
+      if (deletePassword.length < 4) {
+        showToast('⚠️ 刪除密碼長度至少需 4 位字元');
+        if (deletePasswordInput) deletePasswordInput.focus();
+        return;
+      }
+
+      if (deletePassword !== confirmDeletePassword) {
+        showToast('⚠️ 兩次輸入的刪除密碼不一致，請重新確認');
+        if (confirmDeletePasswordInput) confirmDeletePasswordInput.focus();
         return;
       }
 
@@ -631,7 +694,14 @@ function initGatheringsManager() {
       const title = titleInput.value.trim();
       const creator = creatorInput.value.trim();
       const deadlineVal = deadlineInput.value;
+      const deletePassword = deletePasswordInput ? deletePasswordInput.value : '';
       const coverUrl = customCoverDataUrl || generateLuxurySvgCover(title, currentOptions[0] || '聚會');
+
+      if (!deletePassword || deletePassword.length < 4) {
+        showToast('⚠️ 請返回第一步設定有效的刪除密碼（至少 4 位）');
+        goToStep(1);
+        return;
+      }
 
       const newActivity = {
         id: 'lgh_act_' + Date.now(),
@@ -650,12 +720,12 @@ function initGatheringsManager() {
       btnFinalCreate.textContent = '雲端同步發布中...';
 
       try {
-        // 先嘗試寫入 Supabase 雲端資料庫
-        const cloudResult = await syncNewActivityToCloud(newActivity);
+        // 先嘗試寫入 Supabase 雲端資料庫（透過後端 RPC 安全計算 bcrypt 雜湊）
+        const cloudResult = await syncNewActivityToCloud(newActivity, deletePassword);
 
         if (cloudResult && cloudResult.success) {
           // 只有在 INSERT 成功時：
-          // 1. 才寫入記憶體與本機 localStorage 快取
+          // 1. 才寫入記憶體與本機 localStorage 快取（絕不含明文刪除密碼）
           if (!activities.some(a => a.id === newActivity.id)) {
             activities.unshift(newActivity);
             saveActivities(activities);
@@ -668,7 +738,7 @@ function initGatheringsManager() {
           closeCreateModal();
 
           // 4. 才顯示建立成功提示
-          showToast(`✨「${title}」已成功發布至雲端資料庫！所有好友皆可看見！`);
+          showToast(`✨「${title}」已成功發布至雲端資料庫！已設定安全刪除密碼。`);
 
           const gatheringSection = document.getElementById('gatherings');
           if (gatheringSection) {
@@ -678,7 +748,7 @@ function initGatheringsManager() {
           }
         } else {
           // 寫入失敗：不要假裝成功、不要關閉視窗、保留使用者已輸入內容
-          const errMsg = cloudResult?.error?.message || '雲端資料庫連線失敗或尚未就緒';
+          const errMsg = cloudResult?.error?.message || cloudResult?.message || '雲端資料庫連線失敗或尚未就緒';
           console.error('發布活動至 Supabase 失敗:', cloudResult?.error || errMsg);
           showToast(`⚠️ 發布失敗：${errMsg}。內容已保留，請重試。`);
         }
@@ -1704,6 +1774,7 @@ function initGatheringsManager() {
 
   function closeViewModal() {
     if (!viewModal) return;
+    closeDeleteModal();
     viewModal.classList.remove('open');
     viewModal.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
@@ -1719,9 +1790,194 @@ function initGatheringsManager() {
     });
   }
 
+  /* ------------------- Activity Deletion Logic (🗑️ 活動刪除密碼驗證) ------------------- */
+  function openDeleteModal() {
+    if (!deleteActivityModal || !currentViewingActivityId) return;
+    const act = activities.find(a => a.id === currentViewingActivityId);
+    if (!act) return;
+
+    if (inputDeletePassword) inputDeletePassword.value = '';
+    if (inputLegacyNewPassword) inputLegacyNewPassword.value = '';
+    if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.value = '';
+
+    if (deletePasswordGroup) deletePasswordGroup.style.display = 'block';
+    if (legacySetPasswordGroup) legacySetPasswordGroup.style.display = 'none';
+
+    deleteActivityModal.classList.add('open');
+    deleteActivityModal.setAttribute('aria-hidden', 'false');
+    if (inputDeletePassword) setTimeout(() => inputDeletePassword.focus(), 150);
+  }
+
+  function closeDeleteModal() {
+    if (!deleteActivityModal) return;
+    deleteActivityModal.classList.remove('open');
+    deleteActivityModal.setAttribute('aria-hidden', 'true');
+    if (inputDeletePassword) inputDeletePassword.value = '';
+    if (inputLegacyNewPassword) inputLegacyNewPassword.value = '';
+    if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.value = '';
+  }
+
+  if (btnOpenDeleteModal) {
+    btnOpenDeleteModal.addEventListener('click', openDeleteModal);
+  }
+
+  if (btnCloseDeleteModal) {
+    btnCloseDeleteModal.addEventListener('click', closeDeleteModal);
+  }
+
+  if (btnCancelDelete) {
+    btnCancelDelete.addEventListener('click', closeDeleteModal);
+  }
+
+  if (deleteActivityModal) {
+    deleteActivityModal.addEventListener('click', (e) => {
+      if (e.target === deleteActivityModal) closeDeleteModal();
+    });
+  }
+
+  // Handle Delete Confirmation Submit
+  if (deleteActivityForm) {
+    deleteActivityForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!currentViewingActivityId) return;
+
+      const act = activities.find(a => a.id === currentViewingActivityId);
+      if (!act) {
+        showToast('⚠️ 找不到欲刪除的活動');
+        closeDeleteModal();
+        return;
+      }
+
+      // 檢查是否處於為舊活動補設密碼狀態
+      const isLegacyMode = legacySetPasswordGroup && legacySetPasswordGroup.style.display !== 'none';
+
+      if (isLegacyMode) {
+        const newPwd = inputLegacyNewPassword ? inputLegacyNewPassword.value : '';
+        const confirmNewPwd = inputLegacyConfirmPassword ? inputLegacyConfirmPassword.value : '';
+
+        if (!newPwd || newPwd.length < 4) {
+          showToast('⚠️ 刪除密碼至少需 4 位字元');
+          if (inputLegacyNewPassword) inputLegacyNewPassword.focus();
+          return;
+        }
+
+        if (newPwd !== confirmNewPwd) {
+          showToast('⚠️ 兩次輸入的密碼不一致，請重新確認');
+          if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.focus();
+          return;
+        }
+
+        if (!confirm(`⚠️ 確定要為「${act.title}」設定此刪除密碼並立即永久刪除此活動嗎？\n此操作無法復原！`)) {
+          return;
+        }
+
+        if (btnConfirmDeleteActivity) {
+          btnConfirmDeleteActivity.disabled = true;
+          btnConfirmDeleteActivity.textContent = '設定並刪除中...';
+        }
+
+        try {
+          const setRes = await setActivityDeletePasswordOnCloud(act.id, newPwd);
+          if (!setRes.success) {
+            showToast(`⚠️ 設定密碼失敗：${setRes.message || '請重試'}`);
+            return;
+          }
+
+          const delRes = await deleteActivityFromCloud(act.id, newPwd);
+          if (delRes.success) {
+            executeLocalActivityDeletion(act.id, act.title);
+          } else {
+            showToast(`⚠️ 刪除失敗：${delRes.message || '請稍後再試'}`);
+          }
+        } catch (err) {
+          console.error('舊活動設定密碼並刪除異常:', err);
+          showToast('⚠️ 執行刪除時發生異常');
+        } finally {
+          if (btnConfirmDeleteActivity) {
+            btnConfirmDeleteActivity.disabled = false;
+            btnConfirmDeleteActivity.textContent = '確認刪除';
+          }
+        }
+        return;
+      }
+
+      // 標準密碼驗證刪除
+      const pwd = inputDeletePassword ? inputDeletePassword.value : '';
+      if (!pwd) {
+        showToast('⚠️ 請輸入活動建立時設定的刪除密碼');
+        if (inputDeletePassword) inputDeletePassword.focus();
+        return;
+      }
+
+      if (!confirm(`⚠️ 確定要永久刪除活動「${act.title}」嗎？\n所有選項、投票紀錄、聊天訊息與照片將全數清除，無法復原！`)) {
+        return;
+      }
+
+      if (btnConfirmDeleteActivity) {
+        btnConfirmDeleteActivity.disabled = true;
+        btnConfirmDeleteActivity.textContent = '驗證密碼刪除中...';
+      }
+
+      try {
+        const res = await deleteActivityFromCloud(act.id, pwd);
+        if (res.success) {
+          executeLocalActivityDeletion(act.id, act.title);
+        } else if (res.error === 'NO_PASSWORD_SET') {
+          // 早期舊活動尚未設定密碼，提示使用者進行補設
+          showToast('此活動尚未設定刪除密碼，請先設定刪除密碼。');
+          if (deletePasswordGroup) deletePasswordGroup.style.display = 'none';
+          if (legacySetPasswordGroup) legacySetPasswordGroup.style.display = 'block';
+          if (inputLegacyNewPassword) setTimeout(() => inputLegacyNewPassword.focus(), 100);
+        } else if (res.error === 'INVALID_PASSWORD') {
+          showToast('❌ 刪除密碼錯誤，無法刪除活動');
+          if (inputDeletePassword) {
+            inputDeletePassword.value = '';
+            inputDeletePassword.focus();
+          }
+        } else {
+          showToast(`⚠️ 刪除失敗：${res.message || '驗證未通過'}`);
+        }
+      } catch (err) {
+        console.error('刪除活動異常:', err);
+        showToast('⚠️ 刪除活動時發生未預期異常');
+      } finally {
+        if (btnConfirmDeleteActivity) {
+          btnConfirmDeleteActivity.disabled = false;
+          btnConfirmDeleteActivity.textContent = '確認刪除';
+        }
+      }
+    });
+  }
+
+  // 本地狀態清理與介面更新
+  function executeLocalActivityDeletion(activityId, title) {
+    markActivityAsDeleted(activityId);
+
+    // 清理前端記憶體與快取
+    activities = activities.filter(a => a.id !== activityId);
+    selections = selections.filter(s => s.activityId !== activityId);
+    messages = messages.filter(m => m.activityId !== activityId);
+    photos = photos.filter(p => p.activityId !== activityId);
+
+    saveActivities(activities);
+    saveSelections(selections);
+    saveMessages(messages);
+    savePhotos(photos);
+
+    closeDeleteModal();
+    closeViewModal();
+    renderGatheringCards();
+
+    showToast(`🗑️ 活動「${title || ''}」及其所有相關資料已成功永久刪除！`);
+  }
+
   // Global escape and arrow keys handler
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (deleteActivityModal && deleteActivityModal.classList.contains('open')) {
+        closeDeleteModal();
+        return;
+      }
       if (photoLightboxModal && photoLightboxModal.classList.contains('open')) {
         closeLightbox();
         return;
@@ -2574,14 +2830,14 @@ async function initSupabaseCloudSync(callbacks = {}) {
   }
 }
 
-// 從 Supabase 讀取所有最新活動
+// 從 Supabase 讀取所有最新活動（絕不查詢 delete_password_hash，保護安全性）
 async function fetchActivitiesFromCloud() {
   if (!supabaseClient || !isSupabaseReady) return;
 
   try {
     const { data, error } = await supabaseClient
       .from('activities')
-      .select('*')
+      .select('id, title, creator, cover, deadline, options, created_at, is_read_only')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -2590,10 +2846,11 @@ async function fetchActivitiesFromCloud() {
       return;
     }
 
-    const cloudData = data || [];
+    const deletedIds = getDeletedActivityIds();
+    const cloudData = (data || []).filter(row => !deletedIds.has(row.id));
     const existingCloudIds = new Set(cloudData.map(row => row.id));
 
-    // 安全單向遷移：將本地已存在的自訂活動 (以 lgh_act_ 開頭) 補同步至雲端（絕不使用 upsert、UPDATE、DELETE）
+    // 安全單向遷移：將本地已存在的自訂活動 (以 lgh_act_ 開頭且未被刪除) 補同步至雲端
     await migrateLocalActivitiesToCloud(existingCloudIds);
 
     // 重新拉取以確保包含剛遷移的最新活動
@@ -2601,10 +2858,10 @@ async function fetchActivitiesFromCloud() {
     if (existingCloudIds.size > cloudData.length) {
       const refetched = await supabaseClient
         .from('activities')
-        .select('*')
+        .select('id, title, creator, cover, deadline, options, created_at, is_read_only')
         .order('created_at', { ascending: false });
       if (!refetched.error && refetched.data) {
-        finalRows = refetched.data;
+        finalRows = refetched.data.filter(row => !deletedIds.has(row.id));
       }
     }
 
@@ -2633,39 +2890,110 @@ async function fetchActivitiesFromCloud() {
   }
 }
 
-// 將新建立的活動寫入 Supabase 雲端資料庫（嚴格使用 INSERT，不使用 upsert）
-async function syncNewActivityToCloud(newActivity) {
+// 將新建立的活動寫入 Supabase 雲端資料庫（透過後端 RPC 安全計算 bcrypt 雜湊，前端絕不儲存明文密碼）
+async function syncNewActivityToCloud(newActivity, deletePassword) {
   if (!supabaseClient || !isSupabaseReady) {
     console.warn('⚠️ 目前尚未連線雲端資料庫，無法寫入 Supabase。');
     return { success: false, error: new Error('目前未連線至 Supabase 雲端資料庫') };
   }
 
   try {
-    // 明確將 JavaScript camelCase 轉換為 Supabase snake_case
-    const dbRow = {
-      id: newActivity.id,
-      title: newActivity.title,
-      creator: newActivity.creator,
-      cover: newActivity.cover || '',
-      deadline: newActivity.deadline,
-      options: newActivity.options,
-      created_at: newActivity.createdAt,
-      is_read_only: newActivity.isReadOnly
-    };
-
-    const { error } = await supabaseClient.from('activities').insert([dbRow]);
+    // 呼叫 Supabase 安全 RPC，由 PostgreSQL pgcrypto 在後端產生 bcrypt hash
+    const { data, error } = await supabaseClient.rpc('create_activity_with_password', {
+      p_id: newActivity.id,
+      p_title: newActivity.title,
+      p_creator: newActivity.creator,
+      p_cover: newActivity.cover || '',
+      p_deadline: newActivity.deadline,
+      p_options: newActivity.options,
+      p_delete_password: deletePassword,
+      p_is_read_only: newActivity.isReadOnly ?? true
+    });
 
     if (error) {
-      console.error('活動寫入 Supabase 失敗:', error);
+      console.error('RPC create_activity_with_password 執行錯誤:', error);
       return { success: false, error };
-    } else {
-      console.log('✅ 活動已成功寫入 Supabase 雲端資料庫！');
-      fetchActivitiesFromCloud();
-      return { success: true };
     }
+
+    if (data && !data.success) {
+      return { success: false, error: new Error(data.error || '活動發布失敗') };
+    }
+
+    console.log('✅ 活動（已設定安全刪除密碼 hash）成功寫入 Supabase！');
+    fetchActivitiesFromCloud();
+    return { success: true };
   } catch (err) {
     console.error('syncNewActivityToCloud 例外錯誤:', err);
     return { success: false, error: err };
+  }
+}
+
+// 透過後端 RPC 安全驗證密碼並聯集清除活動及其關聯資料
+async function deleteActivityFromCloud(activityId, password) {
+  if (!supabaseClient || !isSupabaseReady) {
+    return { success: false, message: '目前未連線至 Supabase 雲端資料庫' };
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc('delete_activity_with_password', {
+      p_activity_id: activityId,
+      p_password: password
+    });
+
+    if (error) {
+      console.error('RPC delete_activity_with_password 執行錯誤:', error);
+      return { success: false, message: error.message };
+    }
+
+    if (data && !data.success) {
+      return {
+        success: false,
+        error: data.error,
+        message: data.message
+      };
+    }
+
+    // 前端同步清理 Storage 照片檔案作為額外保證
+    try {
+      const actPhotos = photos.filter(p => p.activityId === activityId);
+      const pathsToRemove = actPhotos.map(p => p.storagePath).filter(Boolean);
+      if (pathsToRemove.length > 0) {
+        await supabaseClient.storage.from('activity-photos').remove(pathsToRemove);
+      }
+    } catch (cleanErr) {
+      console.warn('Storage 檔案補充清理略過:', cleanErr);
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('deleteActivityFromCloud 例外錯誤:', err);
+    return { success: false, message: err.message || '操作異常' };
+  }
+}
+
+// 為尚未設定刪除密碼的舊活動補設刪除密碼
+async function setActivityDeletePasswordOnCloud(activityId, newPassword) {
+  if (!supabaseClient || !isSupabaseReady) {
+    return { success: false, message: '目前未連線至 Supabase 雲端資料庫' };
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc('set_activity_delete_password', {
+      p_activity_id: activityId,
+      p_new_password: newPassword
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    if (data && !data.success) {
+      return { success: false, message: data.message || data.error };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, message: err.message };
   }
 }
 
@@ -2744,8 +3072,8 @@ async function migrateLocalActivitiesToCloud(existingCloudIds) {
     // 嚴格篩選：只抓取使用者自訂建立之活動（ID 以 lgh_act_ 開頭）
     const customActivities = localList.filter(a => a && typeof a.id === 'string' && a.id.startsWith('lgh_act_'));
 
-    // 找出雲端尚未存在的活動
-    const pendingToMigrate = customActivities.filter(a => !existingCloudIds.has(a.id));
+    const deletedIds = getDeletedActivityIds();
+    const pendingToMigrate = customActivities.filter(a => !existingCloudIds.has(a.id) && !deletedIds.has(a.id));
 
     if (pendingToMigrate.length === 0) {
       return;

@@ -514,6 +514,17 @@
           <span class="field-hint">好友投票與選擇的截止時間點</span>
         </div>
 
+        <div class="form-group">
+          <label for="deletePasswordInput">刪除密碼 <span class="required">*</span></label>
+          <input type="password" id="deletePasswordInput" required placeholder="請設定 4 位以上刪除密碼" class="form-input" autocomplete="new-password">
+          <span class="field-hint">此密碼將用於日後刪除活動，請自行保存。</span>
+        </div>
+
+        <div class="form-group">
+          <label for="confirmDeletePasswordInput">確認刪除密碼 <span class="required">*</span></label>
+          <input type="password" id="confirmDeletePasswordInput" required placeholder="請再次輸入刪除密碼" class="form-input" autocomplete="new-password">
+        </div>
+
         <div class="modal-actions">
           <button type="button" class="btn-cancel" id="btnCancelStepModal">取消</button>
           <button type="button" class="btn-create-hero" id="btnStep1Next">
@@ -593,6 +604,10 @@
               <div class="meta-block">
                 <span class="meta-label">截止日期</span>
                 <span class="meta-val" id="reviewDeadline">2026/09/30 23:59</span>
+              </div>
+              <div class="meta-block">
+                <span class="meta-label">刪除密碼</span>
+                <span class="meta-val" id="reviewDeletePassword">🔒 已設定安全保護</span>
               </div>
             </div>
 
@@ -795,10 +810,90 @@
           </div>
         </div>
 
+        <!-- Activity Management & Danger Zone (活動管理區) -->
+        <div class="activity-danger-zone" id="activityDangerZone">
+          <div class="danger-zone-header">
+            <span class="danger-icon">⚙️</span>
+            <span class="danger-title">活動管理設定</span>
+          </div>
+          <p class="danger-desc">若活動需取消或封存清理，持有建立時設定之刪除密碼者可進行安全刪除。</p>
+          <div class="danger-action-row">
+            <button type="button" class="btn-danger-delete" id="btnOpenDeleteModal">
+              <span>🗑️ 刪除活動</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Footer -->
         <div class="view-modal-footer">
           <button type="button" class="btn-explore-glass" id="btnCloseViewModal">關閉視窗</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Modal: 刪除活動確認視窗 (Delete Activity Confirmation) ================= -->
+  <div class="modal-overlay" id="deleteActivityModal" aria-hidden="true" role="dialog" aria-labelledby="deleteModalTitle">
+    <div class="modal-dialog delete-modal-dialog">
+      <button type="button" class="modal-close-btn" id="btnCloseDeleteModal" aria-label="關閉視窗">✕</button>
+      <div class="delete-modal-content">
+        <div class="delete-modal-header">
+          <div class="delete-icon-circle">🗑️</div>
+          <h3 class="delete-modal-title" id="deleteModalTitle">刪除活動</h3>
+          <p class="delete-modal-warning">⚠️ 此操作無法復原。將永久刪除此活動及其所有投票選項、好友投票紀錄、聊天室訊息與回憶照片。</p>
+        </div>
+
+        <form class="delete-activity-form" id="deleteActivityForm" onsubmit="return false;">
+          <!-- 標準情況：輸入活動建立時之刪除密碼 -->
+          <div id="deletePasswordGroup">
+            <div class="form-group">
+              <label for="inputDeletePassword">請輸入建立活動時設定的刪除密碼：<span class="required">*</span></label>
+              <input 
+                type="password" 
+                id="inputDeletePassword" 
+                class="form-input" 
+                placeholder="輸入刪除密碼" 
+                autocomplete="current-password"
+              >
+              <span class="field-hint">驗證成功後將立即自雲端資料庫與相簿中完整清除</span>
+            </div>
+          </div>
+
+          <!-- 早期舊活動相容情況：若活動尚未設定刪除密碼 -->
+          <div id="legacySetPasswordGroup" style="display: none;">
+            <div class="legacy-notice-box">
+              <span class="info-icon">ℹ️</span>
+              <p>此活動為早期建立，尚未設定刪除密碼。請先為此活動設定一組刪除密碼以進行確認：</p>
+            </div>
+            <div class="form-group">
+              <label for="inputLegacyNewPassword">設定刪除密碼：<span class="required">*</span></label>
+              <input 
+                type="password" 
+                id="inputLegacyNewPassword" 
+                class="form-input" 
+                placeholder="請輸入欲設定的刪除密碼"
+                autocomplete="new-password"
+              >
+            </div>
+            <div class="form-group">
+              <label for="inputLegacyConfirmPassword">再次確認密碼：<span class="required">*</span></label>
+              <input 
+                type="password" 
+                id="inputLegacyConfirmPassword" 
+                class="form-input" 
+                placeholder="再次輸入相同密碼"
+                autocomplete="new-password"
+              >
+            </div>
+          </div>
+
+          <div class="delete-modal-actions">
+            <button type="button" class="btn-cancel-glass" id="btnCancelDelete">取消</button>
+            <button type="submit" class="btn-confirm-delete" id="btnConfirmDeleteActivity">
+              <span class="btn-text">確認刪除</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -918,6 +1013,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- Scripts -->
-  <script src="script.js?v=20260925_photos_v2"></script>
+  <script src="script.js?v=20260925_del_v3"></script>
 </body>
 </html>
