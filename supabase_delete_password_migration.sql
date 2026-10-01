@@ -11,13 +11,20 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE public.activities 
 ADD COLUMN IF NOT EXISTS delete_password_hash TEXT;
 
--- 3. 建立安全 RPC：建立活動時設定刪除密碼 (以 bcrypt 雜湊儲存，絕不存明文)
+-- 3. 清理可能已存在的舊版本簽名，避免多載衝突
+DROP FUNCTION IF EXISTS public.create_activity_with_password(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, JSONB, TEXT, BOOLEAN);
+DROP FUNCTION IF EXISTS public.create_activity_with_password(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TEXT, BOOLEAN);
+DROP FUNCTION IF EXISTS public.delete_activity_with_password(TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.set_activity_delete_password(TEXT, TEXT);
+
+-- 4. 建立安全 RPC：建立活動時設定刪除密碼 (以 bcrypt 雜湊儲存，絕不存明文)
+-- 支援 TEXT 格式的 p_deadline
 CREATE OR REPLACE FUNCTION public.create_activity_with_password(
     p_id TEXT,
     p_title TEXT,
     p_creator TEXT,
     p_cover TEXT,
-    p_deadline TIMESTAMPTZ,
+    p_deadline TEXT,
     p_options JSONB,
     p_delete_password TEXT,
     p_is_read_only BOOLEAN DEFAULT true
@@ -40,7 +47,15 @@ BEGIN
     INSERT INTO public.activities (
         id, title, creator, cover, deadline, options, delete_password_hash, is_read_only, created_at
     ) VALUES (
-        p_id, p_title, p_creator, p_cover, p_deadline, p_options, v_hash, p_is_read_only, timezone('utc'::text, now())
+        p_id, 
+        p_title, 
+        p_creator, 
+        p_cover, 
+        p_deadline, 
+        p_options, 
+        v_hash, 
+        p_is_read_only, 
+        timezone('utc'::text, now())
     );
 
     RETURN jsonb_build_object('success', true, 'id', p_id);
@@ -49,7 +64,30 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 4. 建立安全 RPC：後端比對刪除密碼並聯集清除活動及其相關資料 (selections, messages, activity_photos, storage.objects)
+-- 額外支援 TIMESTAMPTZ 格式的 p_deadline 多載版本 (雙重保證 PostgREST 型態精確比對)
+CREATE OR REPLACE FUNCTION public.create_activity_with_password(
+    p_id TEXT,
+    p_title TEXT,
+    p_creator TEXT,
+    p_cover TEXT,
+    p_deadline TIMESTAMPTZ,
+    p_options JSONB,
+    p_delete_password TEXT,
+    p_is_read_only BOOLEAN DEFAULT true
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+BEGIN
+    RETURN public.create_activity_with_password(
+        p_id, p_title, p_creator, p_cover, p_deadline::text, p_options, p_delete_password, p_is_read_only
+    );
+END;
+$$;
+
+-- 5. 建立安全 RPC：後端比對刪除密碼並聯集清除活動及其相關資料 (selections, messages, activity_photos, storage.objects, events)
 CREATE OR REPLACE FUNCTION public.delete_activity_with_password(
     p_activity_id TEXT,
     p_password TEXT
@@ -83,9 +121,13 @@ BEGIN
 
     -- 4. 密碼驗證通過，執行聯集安全清理
     -- 清理 storage.objects 中該活動的所有圖片檔案 (避免孤兒照片)
-    DELETE FROM storage.objects 
-    WHERE bucket_id = 'activity-photos' 
-      AND (name LIKE p_activity_id || '/%' OR path_tokens[1] = p_activity_id);
+    BEGIN
+        DELETE FROM storage.objects 
+        WHERE bucket_id = 'activity-photos' 
+          AND (name LIKE p_activity_id || '/%' OR (path_tokens IS NOT NULL AND path_tokens[1] = p_activity_id));
+    EXCEPTION WHEN OTHERS THEN
+        -- 略過 storage 清理例外，確保後續資料表順利清除
+    END;
 
     -- 清理 activity_photos metadata
     DELETE FROM public.activity_photos WHERE activity_id = p_activity_id;
@@ -110,7 +152,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 5. 建立安全 RPC：為早期尚未設定刪除密碼的舊活動補設刪除密碼
+-- 6. 建立安全 RPC：為早期尚未設定刪除密碼的舊活動補設刪除密碼
 CREATE OR REPLACE FUNCTION public.set_activity_delete_password(
     p_activity_id TEXT,
     p_new_password TEXT
@@ -150,12 +192,13 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 6. 授予公開/匿名呼叫權限
-GRANT EXECUTE ON FUNCTION public.create_activity_with_password TO anon, authenticated, public;
-GRANT EXECUTE ON FUNCTION public.delete_activity_with_password TO anon, authenticated, public;
-GRANT EXECUTE ON FUNCTION public.set_activity_delete_password TO anon, authenticated, public;
+-- 7. 授予公開/匿名呼叫權限
+GRANT EXECUTE ON FUNCTION public.create_activity_with_password(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TEXT, BOOLEAN) TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION public.create_activity_with_password(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, JSONB, TEXT, BOOLEAN) TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION public.delete_activity_with_password(TEXT, TEXT) TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION public.set_activity_delete_password(TEXT, TEXT) TO anon, authenticated, service_role, public;
 
--- 7. 強化 activities 資料表之 RLS 安全防護（防止未經授權直接 DELETE）
+-- 8. 強化 activities 資料表之 RLS 安全防護（防止未經授權直接 DELETE）
 ALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;
 
 -- 允許所有人匿名 SELECT
@@ -177,3 +220,5 @@ WITH CHECK (true);
 -- 禁止匿名直接 DELETE（強制所有刪除操作必須透過 delete_activity_with_password 密碼驗證）
 DROP POLICY IF EXISTS "Allow public delete activities" ON public.activities;
 
+-- 9. 重新載入 PostgREST schema cache（確保所有函數立即生效）
+NOTIFY pgrst, 'reload schema';

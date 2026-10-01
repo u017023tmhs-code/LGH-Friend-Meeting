@@ -2904,14 +2904,20 @@ async function syncNewActivityToCloud(newActivity, deletePassword) {
       p_title: newActivity.title,
       p_creator: newActivity.creator,
       p_cover: newActivity.cover || '',
-      p_deadline: newActivity.deadline,
+      p_deadline: String(newActivity.deadline || ''),
       p_options: newActivity.options,
       p_delete_password: deletePassword,
-      p_is_read_only: newActivity.isReadOnly ?? true
+      p_is_read_only: Boolean(newActivity.isReadOnly ?? true)
     });
 
     if (error) {
       console.error('RPC create_activity_with_password 執行錯誤:', error);
+      if (error.message && error.message.includes('schema cache')) {
+        return { 
+          success: false, 
+          error: new Error('雲端資料庫尚未建立驗證函數（請先在 Supabase SQL Editor 執行 supabase_delete_password_migration.sql）') 
+        };
+      }
       return { success: false, error };
     }
 
