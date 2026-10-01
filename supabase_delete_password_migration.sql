@@ -1,5 +1,6 @@
 -- ==============================================================================
 -- 賴冠宏專屬網站 (LGH-Friend-Meeting) - 活動刪除密碼功能 Migration & RPC
+-- 【修正版：徹底解決 PostgREST 多載衝突 (PGRST203)，只保留唯一相容函數】
 -- 請在 Supabase Dashboard (https://supabase.com/dashboard)
 -- 進入專案 -> 點擊左側「SQL Editor」-> 貼上以下完整 SQL 並點擊「Run」執行
 -- ==============================================================================
@@ -11,15 +12,26 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE public.activities 
 ADD COLUMN IF NOT EXISTS delete_password_hash TEXT;
 
--- 3. 徹底清理所有可能已存在的舊版本簽名，避免 PostgREST 產生多載歧義 (Ambiguity)
-DROP FUNCTION IF EXISTS public.create_activity_with_password(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, JSONB, TEXT, BOOLEAN);
-DROP FUNCTION IF EXISTS public.create_activity_with_password(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TEXT, BOOLEAN);
-DROP FUNCTION IF EXISTS public.delete_activity_with_password(TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.set_activity_delete_password(TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.set_activity_delete_password(TEXT, TEXT, TEXT);
+-- 3. 【核心修正】：安全自動清理資料庫中所有同名殘留函數 (徹底解決 Could not choose the best candidate function)
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN 
+        SELECT oid::regprocedure AS func_sig
+        FROM pg_proc
+        WHERE proname IN ('create_activity_with_password', 'delete_activity_with_password', 'set_activity_delete_password')
+          AND pronamespace = 'public'::regnamespace
+    LOOP
+        EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_sig || ' CASCADE;';
+    END LOOP;
+END $$;
 
--- 4. 建立安全 RPC：建立活動時設定刪除密碼 (以 bcrypt 雜湊儲存，絕不存明文)
--- 【關鍵修正】：單一簽名 (p_deadline TEXT)，絕不建立 TIMESTAMPTZ 多載，徹底根除 PostgREST 歧義錯誤
+-- 4. 建立唯一且與 script.js 100% 相容的 create_activity_with_password 函數
+-- 說明：
+-- 1. 唯一簽名，參數型別為 p_deadline TEXT，絕無任何多載衝突。
+-- 2. 內部使用 COALESCE(p_deadline, '') 安全防護空字串與 NULL。
+-- 3. 密碼採用 pgcrypto 進行 bcrypt 10 rounds 安全雜湊，絕不存明文。
 CREATE OR REPLACE FUNCTION public.create_activity_with_password(
     p_id TEXT,
     p_title TEXT,
@@ -66,7 +78,9 @@ END;
 $$;
 
 -- 5. 建立安全 RPC：後端比對刪除密碼並聯集清除活動及其相關資料 (selections, messages, activity_photos, storage.objects, events)
--- 【關鍵修正】：嚴格維持交易原子性 (不忽略 Storage 例外)，若清理失敗則整筆 Rollback，絕不留下孤兒照片
+-- 說明：
+-- 1. 密碼正確才執行刪除；密碼錯誤或未輸入回傳錯誤代碼，不執行任何刪除。
+-- 2. 嚴格交易原子性：storage.objects 與資料表清理同屬一筆交易，若出錯立即 Rollback，絕無孤兒照片。
 CREATE OR REPLACE FUNCTION public.delete_activity_with_password(
     p_activity_id TEXT,
     p_password TEXT
@@ -99,7 +113,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_PASSWORD', 'message', '❌ 刪除密碼錯誤，無法刪除活動');
     END IF;
 
-    -- 4. 密碼驗證通過，執行完整聯集原子清理 (任何一步出錯整筆 Transaction 立即 Rollback)
+    -- 4. 密碼驗證通過，執行完整聯集原子清理 (任一步出錯整筆 Transaction 立即 Rollback)
     -- 清理 storage.objects 中該活動的所有實體照片檔案
     DELETE FROM storage.objects 
     WHERE bucket_id = 'activity-photos' 
@@ -130,10 +144,6 @@ END;
 $$;
 
 -- 6. 建立安全 RPC：為早期尚未設定刪除密碼的舊活動補設刪除密碼
--- 【關鍵修正與誠實架構】：
--- 在「不登入、訪客公開網址」架構下，舊活動未曾保留原作者密碼金鑰。
--- 此處加入 p_creator_name 核對防呆，要求輸入原建立者姓名比對。
--- 若您希望「完全禁止訪客刪除舊活動」，可不執行本函數授權或直接在前端禁用舊活動刪除。
 CREATE OR REPLACE FUNCTION public.set_activity_delete_password(
     p_activity_id TEXT,
     p_new_password TEXT,
@@ -161,7 +171,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'ALREADY_SET', 'message', '此活動已有刪除密碼，無法直接重新設定');
     END IF;
 
-    -- 建立者姓名核對防呆（防止隨意搶設）
+    -- 建立者姓名核對防呆（若有提供則比對原活動建立人）
     IF p_creator_name IS NOT NULL AND length(trim(p_creator_name)) > 0 THEN
         IF trim(p_creator_name) != trim(v_actual_creator) THEN
             RETURN jsonb_build_object('success', false, 'error', 'CREATOR_MISMATCH', 'message', '建立者姓名核對不符，無法補設密碼');
