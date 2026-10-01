@@ -2970,10 +2970,14 @@ async function deleteActivityFromCloud(activityId, password) {
         .remove(photoPaths);
 
       if (storageRemoveErr) {
-        console.warn('Storage API 刪除實體檔案出現警告 (繼續清理資料庫 metadata):', storageRemoveErr.message);
-      } else {
-        console.log('✅ Storage 實體照片已透過官方 Storage API 成功清除！');
+        console.error('Storage 實體照片刪除失敗:', storageRemoveErr);
+        return {
+          success: false,
+          error: 'STORAGE_DELETE_FAILED',
+          message: `Storage 相片檔案刪除失敗（${storageRemoveErr.message}），為防止產生孤兒檔案，活動資料庫尚未刪除。`
+        };
       }
+      console.log('✅ Storage 實體照片已透過官方 Storage API 成功清除！');
     }
 
     // 第三步：呼叫 RPC 刪除 activity_photos metadata 與 activities/selections/messages 等資料
