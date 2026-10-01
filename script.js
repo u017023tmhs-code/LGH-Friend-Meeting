@@ -2934,40 +2934,65 @@ async function syncNewActivityToCloud(newActivity, deletePassword) {
   }
 }
 
-// 透過後端 RPC 安全驗證密碼並聯集清除活動及其關聯資料
+// 透過後端 RPC 安全驗證密碼，再使用官方 Storage API 刪除照片檔案，最後聯集清理資料庫
 async function deleteActivityFromCloud(activityId, password) {
   if (!supabaseClient || !isSupabaseReady) {
     return { success: false, message: '目前未連線至 Supabase 雲端資料庫' };
   }
 
   try {
-    const { data, error } = await supabaseClient.rpc('delete_activity_with_password', {
+    // 第一步：呼叫 RPC 驗證密碼並取得該活動的所有 Storage 照片路徑
+    const { data: verifyData, error: verifyErr } = await supabaseClient.rpc('get_activity_photos_for_deletion', {
       p_activity_id: activityId,
       p_password: password
     });
 
-    if (error) {
-      console.error('RPC delete_activity_with_password 執行錯誤:', error);
-      return { success: false, message: error.message };
+    if (verifyErr) {
+      console.error('RPC get_activity_photos_for_deletion 執行錯誤:', verifyErr);
+      return { success: false, message: verifyErr.message };
     }
 
-    if (data && !data.success) {
+    if (!verifyData || !verifyData.success) {
       return {
         success: false,
-        error: data.error,
-        message: data.message
+        error: verifyData?.error || 'VERIFY_FAILED',
+        message: verifyData?.message || '密碼驗證未通過'
       };
     }
 
-    // 前端同步清理 Storage 照片檔案作為額外保證
-    try {
-      const actPhotos = photos.filter(p => p.activityId === activityId);
-      const pathsToRemove = actPhotos.map(p => p.storagePath).filter(Boolean);
-      if (pathsToRemove.length > 0) {
-        await supabaseClient.storage.from('activity-photos').remove(pathsToRemove);
+    const photoPaths = Array.isArray(verifyData.photo_paths) ? verifyData.photo_paths : [];
+
+    // 第二步：使用 Supabase 官方 Storage API remove() 刪除 Storage 實體照片
+    if (photoPaths.length > 0) {
+      console.log(`🗑️ 正在透過 Supabase 官方 Storage API 清除 ${photoPaths.length} 張實體照片...`);
+      const { error: storageRemoveErr } = await supabaseClient.storage
+        .from('activity-photos')
+        .remove(photoPaths);
+
+      if (storageRemoveErr) {
+        console.warn('Storage API 刪除實體檔案出現警告 (繼續清理資料庫 metadata):', storageRemoveErr.message);
+      } else {
+        console.log('✅ Storage 實體照片已透過官方 Storage API 成功清除！');
       }
-    } catch (cleanErr) {
-      console.warn('Storage 檔案補充清理略過:', cleanErr);
+    }
+
+    // 第三步：呼叫 RPC 刪除 activity_photos metadata 與 activities/selections/messages 等資料
+    const { data: delData, error: delErr } = await supabaseClient.rpc('delete_activity_with_password', {
+      p_activity_id: activityId,
+      p_password: password
+    });
+
+    if (delErr) {
+      console.error('RPC delete_activity_with_password 執行錯誤:', delErr);
+      return { success: false, message: delErr.message };
+    }
+
+    if (!delData || !delData.success) {
+      return {
+        success: false,
+        error: delData?.error,
+        message: delData?.message || '活動資料刪除失敗'
+      };
     }
 
     return { success: true };

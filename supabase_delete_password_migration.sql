@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- 賴冠宏專屬網站 (LGH-Friend-Meeting) - 活動刪除密碼功能 Migration & RPC
--- 【修正版：徹底解決 PostgREST 多載衝突 (PGRST203)，只保留唯一相容函數】
+-- 【官方 Storage API 架構修正版：不直接操作 storage.objects，前端官方 API 刪除實體照片】
 -- 請在 Supabase Dashboard (https://supabase.com/dashboard)
 -- 進入專案 -> 點擊左側「SQL Editor」-> 貼上以下完整 SQL 並點擊「Run」執行
 -- ==============================================================================
@@ -12,7 +12,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE public.activities 
 ADD COLUMN IF NOT EXISTS delete_password_hash TEXT;
 
--- 3. 【核心修正】：安全自動清理資料庫中所有同名殘留函數 (徹底解決 Could not choose the best candidate function)
+-- 3. 安全自動清理資料庫中所有同名殘留函數 (徹底解決 Could not choose the best candidate function)
 DO $$
 DECLARE
     r RECORD;
@@ -20,8 +20,13 @@ BEGIN
     FOR r IN 
         SELECT oid::regprocedure AS func_sig
         FROM pg_proc
-        WHERE proname IN ('create_activity_with_password', 'delete_activity_with_password', 'set_activity_delete_password')
-          AND pronamespace = 'public'::regnamespace
+        WHERE proname IN (
+            'create_activity_with_password', 
+            'delete_activity_with_password', 
+            'set_activity_delete_password',
+            'get_activity_photos_for_deletion'
+        )
+        AND pronamespace = 'public'::regnamespace
     LOOP
         EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_sig || ' CASCADE;';
     END LOOP;
@@ -29,7 +34,7 @@ END $$;
 
 -- 4. 建立唯一且與 script.js 100% 相容的 create_activity_with_password 函數
 -- 說明：
--- 1. 唯一簽名，參數型別為 p_deadline TEXT，絕無任何多載衝突。
+-- 1. 唯一簽名 (p_deadline TEXT)，絕無任何多載衝突。
 -- 2. 內部使用 COALESCE(p_deadline, '') 安全防護空字串與 NULL。
 -- 3. 密碼採用 pgcrypto 進行 bcrypt 10 rounds 安全雜湊，絕不存明文。
 CREATE OR REPLACE FUNCTION public.create_activity_with_password(
@@ -77,22 +82,21 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 5. 建立安全 RPC：後端比對刪除密碼並聯集清除活動及其相關資料 (selections, messages, activity_photos, storage.objects, events)
+-- 5. 建立安全 RPC：第一階段 - 驗證密碼並回傳該活動的所有 Storage 照片路徑
 -- 說明：
--- 1. 密碼正確才執行刪除；密碼錯誤或未輸入回傳錯誤代碼，不執行任何刪除。
--- 2. 嚴格交易原子性：storage.objects 與資料表清理同屬一筆交易，若出錯立即 Rollback，絕無孤兒照片。
-CREATE OR REPLACE FUNCTION public.delete_activity_with_password(
+-- 密碼正確才回傳該活動在 activity_photos 資料表中的所有 storage_path，供前端呼叫官方 Storage API remove()
+CREATE OR REPLACE FUNCTION public.get_activity_photos_for_deletion(
     p_activity_id TEXT,
     p_password TEXT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, extensions, storage
+SET search_path = public, extensions
 AS $$
 DECLARE
     v_stored_hash TEXT;
-    v_photo_count INT := 0;
+    v_paths TEXT[];
 BEGIN
     -- 1. 查找活動與其密碼 hash
     SELECT delete_password_hash INTO v_stored_hash
@@ -113,13 +117,54 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_PASSWORD', 'message', '❌ 刪除密碼錯誤，無法刪除活動');
     END IF;
 
-    -- 4. 密碼驗證通過，執行完整聯集原子清理 (任一步出錯整筆 Transaction 立即 Rollback)
-    -- 清理 storage.objects 中該活動的所有實體照片檔案
-    DELETE FROM storage.objects 
-    WHERE bucket_id = 'activity-photos' 
-      AND (name LIKE p_activity_id || '/%' OR (path_tokens IS NOT NULL AND path_tokens[1] = p_activity_id));
-    GET DIAGNOSTICS v_photo_count = ROW_COUNT;
+    -- 4. 撈取該活動的所有相片 storage_path
+    SELECT COALESCE(array_agg(storage_path), ARRAY[]::TEXT[])
+    INTO v_paths
+    FROM public.activity_photos
+    WHERE activity_id = p_activity_id;
 
+    RETURN jsonb_build_object('success', true, 'photo_paths', v_paths);
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'error', 'SQL_ERROR', 'message', SQLERRM);
+END;
+$$;
+
+-- 6. 建立安全 RPC：第二階段 - 密碼驗證後聯集清理資料庫中所有活動相關資料
+-- 說明：
+-- 【關鍵修正】：完全不直接操作 storage.objects！遵照官方規則，實體檔案由前端 Storage API 清理。
+-- 本函數專注於安全刪除 activity_photos metadata、messages、selections、events 及 activities 主紀錄。
+CREATE OR REPLACE FUNCTION public.delete_activity_with_password(
+    p_activity_id TEXT,
+    p_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+    v_stored_hash TEXT;
+BEGIN
+    -- 1. 查找活動與其密碼 hash
+    SELECT delete_password_hash INTO v_stored_hash
+    FROM public.activities
+    WHERE id = p_activity_id;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'NOT_FOUND', 'message', '找不到此活動');
+    END IF;
+
+    -- 2. 舊活動若尚未設定密碼
+    IF v_stored_hash IS NULL OR length(trim(v_stored_hash)) = 0 THEN
+        RETURN jsonb_build_object('success', false, 'error', 'NO_PASSWORD_SET', 'message', '此活動尚未設定刪除密碼，請先設定刪除密碼。');
+    END IF;
+
+    -- 3. 再次比對密碼 (以 crypt 安全比對)
+    IF crypt(p_password, v_stored_hash) != v_stored_hash THEN
+        RETURN jsonb_build_object('success', false, 'error', 'INVALID_PASSWORD', 'message', '❌ 刪除密碼錯誤，無法刪除活動');
+    END IF;
+
+    -- 4. 密碼驗證通過，執行資料庫聯集原子清理 (絕不直接操作 storage.objects)
     -- 清理 activity_photos metadata
     DELETE FROM public.activity_photos WHERE activity_id = p_activity_id;
 
@@ -137,13 +182,13 @@ BEGIN
     -- 清理 activities 主紀錄
     DELETE FROM public.activities WHERE id = p_activity_id;
 
-    RETURN jsonb_build_object('success', true, 'deleted_storage_objects', v_photo_count);
+    RETURN jsonb_build_object('success', true);
 EXCEPTION WHEN OTHERS THEN
     RETURN jsonb_build_object('success', false, 'error', 'SQL_ERROR', 'message', SQLERRM);
 END;
 $$;
 
--- 6. 建立安全 RPC：為早期尚未設定刪除密碼的舊活動補設刪除密碼
+-- 7. 建立安全 RPC：為早期尚未設定刪除密碼的舊活動補設刪除密碼
 CREATE OR REPLACE FUNCTION public.set_activity_delete_password(
     p_activity_id TEXT,
     p_new_password TEXT,
@@ -192,12 +237,13 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 7. 授予公開/匿名呼叫權限
+-- 8. 授予公開/匿名呼叫權限
 GRANT EXECUTE ON FUNCTION public.create_activity_with_password(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TEXT, BOOLEAN) TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION public.get_activity_photos_for_deletion(TEXT, TEXT) TO anon, authenticated, service_role, public;
 GRANT EXECUTE ON FUNCTION public.delete_activity_with_password(TEXT, TEXT) TO anon, authenticated, service_role, public;
 GRANT EXECUTE ON FUNCTION public.set_activity_delete_password(TEXT, TEXT, TEXT) TO anon, authenticated, service_role, public;
 
--- 8. 強化 activities 資料表之 RLS 安全防護（防止未經授權直接 DELETE）
+-- 9. 強化 activities 資料表之 RLS 安全防護（防止未經授權直接 DELETE）
 ALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;
 
 -- 允許所有人匿名 SELECT
@@ -216,8 +262,16 @@ FOR INSERT
 TO public
 WITH CHECK (true);
 
--- 禁止匿名直接 DELETE（強制所有刪除操作必須透過 delete_activity_with_password 密碼驗證）
+-- 禁止匿名直接 DELETE（強制所有刪除操作必須透過 RPC 密碼驗證）
 DROP POLICY IF EXISTS "Allow public delete activities" ON public.activities;
 
--- 9. 重新載入 PostgREST schema cache（確保所有函數立即生效）
+-- 10. 設定 Storage Objects DELETE 政策（允許前端透過官方 Storage API 刪除 activity-photos 圖片）
+DROP POLICY IF EXISTS "Allow public delete activity-photos" ON storage.objects;
+CREATE POLICY "Allow public delete activity-photos"
+ON storage.objects
+FOR DELETE
+TO public
+USING (bucket_id = 'activity-photos');
+
+-- 11. 重新載入 PostgREST schema cache（確保所有函數立即生效）
 NOTIFY pgrst, 'reload schema';
