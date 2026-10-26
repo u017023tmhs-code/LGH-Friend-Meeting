@@ -3229,7 +3229,7 @@ async function fetchActivitiesFromCloud() {
   try {
     const { data, error } = await supabaseClient
       .from('activities')
-      .select('id, title, creator, cover, deadline, options, created_at, is_read_only')
+      .select('id, title, creator, location, cover, deadline, options, created_at, is_read_only')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -3250,7 +3250,7 @@ async function fetchActivitiesFromCloud() {
     if (existingCloudIds.size > cloudData.length) {
       const refetched = await supabaseClient
         .from('activities')
-        .select('id, title, creator, cover, deadline, options, created_at, is_read_only')
+        .select('id, title, creator, location, cover, deadline, options, created_at, is_read_only')
         .order('created_at', { ascending: false });
       if (!refetched.error && refetched.data) {
         finalRows = refetched.data.filter(row => !deletedIds.has(row.id));
@@ -3263,6 +3263,7 @@ async function fetchActivitiesFromCloud() {
         id: row.id,
         title: row.title,
         creator: row.creator,
+        location: row.location || '',
         cover: row.cover,
         deadline: row.deadline,
         options: Array.isArray(row.options) 
@@ -3290,11 +3291,12 @@ async function syncNewActivityToCloud(newActivity, deletePassword) {
   }
 
   try {
-    // 呼叫 Supabase 安全 RPC，由 PostgreSQL pgcrypto 在後端產生 bcrypt hash
-    const { data, error } = await supabaseClient.rpc('create_activity_with_password', {
+    // 呼叫 Supabase 安全 RPC，由 PostgreSQL pgcrypto 在後端產生 bcrypt hash 並儲存地點
+    const { data, error } = await supabaseClient.rpc('create_activity_with_location_and_password', {
       p_id: newActivity.id,
       p_title: newActivity.title,
       p_creator: newActivity.creator,
+      p_location: String(newActivity.location || '').trim(),
       p_cover: newActivity.cover || '',
       p_deadline: String(newActivity.deadline || ''),
       p_options: newActivity.options,
@@ -3303,21 +3305,23 @@ async function syncNewActivityToCloud(newActivity, deletePassword) {
     });
 
     if (error) {
-      console.error('RPC create_activity_with_password 執行錯誤:', error);
+      console.error('RPC create_activity_with_location_and_password 執行錯誤:', error);
       if (error.message && error.message.includes('schema cache')) {
         return { 
           success: false, 
-          error: new Error('雲端資料庫尚未建立驗證函數（請先在 Supabase SQL Editor 執行 supabase_delete_password_migration.sql）') 
+          error: new Error('雲端資料庫尚未建立驗證函數（請先在 Supabase SQL Editor 執行含有 create_activity_with_location_and_password 的遷移腳本）') 
         };
       }
       return { success: false, error };
     }
 
-    if (data && !data.success) {
-      return { success: false, error: new Error(data.error || '活動發布失敗') };
+    // 嚴格校驗：只有在 data 存在且 data.success === true 時才判定成功，不可誤報成功
+    if (!data || data.success !== true) {
+      const errMsg = (data && data.error) ? data.error : '活動發布失敗（RPC 未回傳成功狀態）';
+      return { success: false, error: new Error(errMsg) };
     }
 
-    console.log('✅ 活動（已設定安全刪除密碼 hash）成功寫入 Supabase！');
+    console.log('✅ 活動（已設定地點與安全刪除密碼 hash）成功寫入 Supabase！');
     fetchActivitiesFromCloud();
     return { success: true };
   } catch (err) {
@@ -3514,6 +3518,7 @@ async function migrateLocalActivitiesToCloud(existingCloudIds) {
           id: act.id,
           title: act.title,
           creator: act.creator,
+          location: act.location || '',
           cover: act.cover || '',
           deadline: act.deadline,
           options: act.options || [],
