@@ -206,6 +206,19 @@ function initGatheringsManager() {
   let messages = loadMessages();
   let photos = loadPhotos();
 
+  // Hero Carousel State
+  let heroCarouselIndex = 0;
+  let heroCarouselTimer = null;
+  let heroCarouselActivities = [];
+  let heroTouchStartX = 0;
+  let heroTouchStartY = 0;
+  let heroTouchEndX = 0;
+  let heroTouchEndY = 0;
+  let heroDidSwipe = false;
+  let heroCarouselListenersBound = false;
+  let heroLastRenderedIndex = -1;
+  let heroTransitionTimeout = null;
+
   // 註冊 Supabase 雲端資料庫雙向同步
   initSupabaseCloudSync({
     onActivitiesSync: (cloudActivities) => {
@@ -278,6 +291,8 @@ function initGatheringsManager() {
   // Wizard Elements
   const creatorInput = document.getElementById('creatorInput');
   const titleInput = document.getElementById('titleInput');
+  const locationInput = document.getElementById('locationInput');
+  const btnPreviewMap = document.getElementById('btnPreviewMap');
   const coverFileInput = document.getElementById('coverFileInput');
   const uploaderIdleState = document.getElementById('uploaderIdleState');
   const uploaderPreviewState = document.getElementById('uploaderPreviewState');
@@ -333,6 +348,7 @@ function initGatheringsManager() {
   const reviewCoverImg = document.getElementById('reviewCoverImg');
   const reviewTitle = document.getElementById('reviewTitle');
   const reviewCreator = document.getElementById('reviewCreator');
+  const reviewLocation = document.getElementById('reviewLocation');
   const reviewDeadline = document.getElementById('reviewDeadline');
   const reviewOptionsChips = document.getElementById('reviewOptionsChips');
   const btnStep3Prev = document.getElementById('btnStep3Prev');
@@ -441,6 +457,7 @@ function initGatheringsManager() {
   function resetWizard() {
     goToStep(1);
     if (titleInput) titleInput.value = '';
+    if (locationInput) locationInput.value = '';
     if (creatorInput) creatorInput.value = '冠宏';
     if (deletePasswordInput) deletePasswordInput.value = '';
     if (confirmDeletePasswordInput) confirmDeletePasswordInput.value = '';
@@ -573,6 +590,32 @@ function initGatheringsManager() {
     });
   }
 
+  // Google 地圖預覽按鈕事件（方案 A：安全新分頁開啟 Google Maps 搜尋結果）
+  if (btnPreviewMap) {
+    btnPreviewMap.addEventListener('click', () => {
+      const locationText = locationInput ? locationInput.value.trim() : '';
+      if (!locationText) {
+        showToast('⚠️ 請先輸入活動地點，再點擊預覽地圖');
+        if (locationInput) locationInput.focus();
+        return;
+      }
+      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationText)}`;
+      window.open(mapsUrl, '_blank', 'noopener,noreferrer');
+    });
+  }
+
+  if (locationInput) {
+    locationInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const locationText = locationInput.value.trim();
+        if (locationText && btnPreviewMap) {
+          btnPreviewMap.click();
+        }
+      }
+    });
+  }
+
   /* ------------------- Step 2: Options Management ------------------- */
   function addOption(text) {
     const trimmed = text.trim();
@@ -670,12 +713,14 @@ function initGatheringsManager() {
   function populateStep3Review() {
     const title = titleInput.value.trim();
     const creator = creatorInput.value.trim();
+    const locationVal = locationInput ? locationInput.value.trim() : '';
     const deadlineVal = deadlineInput.value;
     const coverUrl = customCoverDataUrl || generateLuxurySvgCover(title, currentOptions[0] || '聚會');
 
     if (reviewCoverImg) reviewCoverImg.src = coverUrl;
     if (reviewTitle) reviewTitle.textContent = title;
     if (reviewCreator) reviewCreator.textContent = creator;
+    if (reviewLocation) reviewLocation.textContent = locationVal || '未設定地點';
     if (reviewDeadline) reviewDeadline.textContent = formatDateTime(deadlineVal);
 
     if (reviewOptionsChips) {
@@ -693,6 +738,7 @@ function initGatheringsManager() {
     btnFinalCreate.addEventListener('click', async () => {
       const title = titleInput.value.trim();
       const creator = creatorInput.value.trim();
+      const locationVal = locationInput ? locationInput.value.trim() : '';
       const deadlineVal = deadlineInput.value;
       const deletePassword = deletePasswordInput ? deletePasswordInput.value : '';
       const coverUrl = customCoverDataUrl || generateLuxurySvgCover(title, currentOptions[0] || '聚會');
@@ -707,6 +753,7 @@ function initGatheringsManager() {
         id: 'lgh_act_' + Date.now(),
         title: title,
         creator: creator,
+        location: locationVal,
         cover: coverUrl,
         deadline: deadlineVal,
         options: [...currentOptions],
@@ -831,6 +878,333 @@ function initGatheringsManager() {
         openViewActivityModal(id);
       });
     });
+
+    // 自動同步首頁 Hero 主視覺（支援多活動輪播）
+    try {
+      updateHeroVisual(activeActivities, activities);
+    } catch (heroErr) {
+      console.warn('Hero visual carousel update skipped:', heroErr);
+    }
+  }
+
+  /* ------------------- Hero Dynamic Multi-Activity Carousel Manager ------------------- */
+  function updateHeroVisual(activeActs, allActs) {
+    const heroTitleEl = document.getElementById('heroActivityTitle');
+    const heroWrapperEl = document.getElementById('heroVisualWrapper');
+    const heroPrevBtn = document.getElementById('heroCarouselPrev');
+    const heroNextBtn = document.getElementById('heroCarouselNext');
+    const heroDotsEl = document.getElementById('heroCarouselDots');
+
+    if (!heroTitleEl) return;
+
+    // 優先使用專案活動資料庫中的現有活動清單（若有活動則依序排列）
+    heroCarouselActivities = Array.isArray(allActs) ? allActs.filter(act => act && act.id) : [];
+
+    // 若完全沒有活動：保留原本 Hero 的預設狀態，隱藏照片框，無錯誤
+    if (heroCarouselActivities.length === 0) {
+      stopHeroCarousel();
+      heroTitleEl.textContent = '陽明山星空包棟歡聚之夜';
+      if (heroWrapperEl) heroWrapperEl.style.display = 'none';
+      if (heroPrevBtn) heroPrevBtn.style.display = 'none';
+      if (heroNextBtn) heroNextBtn.style.display = 'none';
+      if (heroDotsEl) heroDotsEl.style.display = 'none';
+      return;
+    }
+
+    // 確保索引值在有效範圍內
+    if (heroCarouselIndex >= heroCarouselActivities.length) {
+      heroCarouselIndex = 0;
+    }
+
+    // 渲染指示圓點 (Dots)
+    renderHeroDots();
+
+    // 依活動數量控制左右箭頭與自動輪播
+    if (heroCarouselActivities.length === 1) {
+      // 只有 1 個活動：不顯示左右箭頭與多餘輪播控制，停止計時器
+      stopHeroCarousel();
+      if (heroPrevBtn) heroPrevBtn.style.display = 'none';
+      if (heroNextBtn) heroNextBtn.style.display = 'none';
+      if (heroDotsEl) heroDotsEl.style.display = 'none';
+    } else {
+      // 2 個以上活動：顯示控制元件並啟用每 5 秒自動輪播
+      if (heroPrevBtn) heroPrevBtn.style.display = 'flex';
+      if (heroNextBtn) heroNextBtn.style.display = 'flex';
+      if (heroDotsEl) heroDotsEl.style.display = 'flex';
+      startHeroCarousel();
+    }
+
+    // 渲染當前活動內容（封面照片、標題、截止日期三者同步更新）
+    renderHeroSlide(heroCarouselIndex);
+
+    // 綁定手動切換事件（桌面箭頭與手機滑動，僅綁定一次）
+    if (!heroCarouselListenersBound) {
+      bindHeroCarouselEvents();
+      heroCarouselListenersBound = true;
+    }
+  }
+
+  function renderHeroSlide(index) {
+    if (!heroCarouselActivities || heroCarouselActivities.length === 0) return;
+
+    // 輪播規則：循環切換（到最後一個活動後，回到第一個活動）
+    const targetIndex = ((index % heroCarouselActivities.length) + heroCarouselActivities.length) % heroCarouselActivities.length;
+    const isSlideSwitch = heroLastRenderedIndex !== -1 && heroLastRenderedIndex !== targetIndex;
+
+    heroCarouselIndex = targetIndex;
+    heroLastRenderedIndex = targetIndex;
+    const act = heroCarouselActivities[heroCarouselIndex];
+
+    const heroTitleEl = document.getElementById('heroActivityTitle');
+    const heroWrapperEl = document.getElementById('heroVisualWrapper');
+    const heroImgEl = document.getElementById('heroCoverImg');
+    const heroImgPrevEl = document.getElementById('heroCoverImgPrev');
+    const heroTagTextEl = document.getElementById('heroVisualTagText');
+    const heroDateTextEl = document.getElementById('heroVisualDateText');
+    const heroDateBadgeEl = document.getElementById('heroVisualDateBadge');
+    const heroFrameEl = document.getElementById('heroVisualFrame');
+    const heroDotsEl = document.getElementById('heroCarouselDots');
+
+    if (!act) return;
+
+    // 1. 標題同步動畫：opacity 0 → 1, translateY(15px) → translateY(0)，約 700ms 高級流暢
+    if (heroTitleEl) {
+      if (isSlideSwitch) {
+        heroTitleEl.classList.add('is-animating-in');
+        heroTitleEl.textContent = act.title || '陽明山星空包棟歡聚之夜';
+        void heroTitleEl.offsetWidth; // 強制重繪以重啟 CSS Transition
+        heroTitleEl.classList.remove('is-animating-in');
+      } else {
+        heroTitleEl.textContent = act.title || '陽明山星空包棟歡聚之夜';
+      }
+    }
+    if (heroTagTextEl) {
+      heroTagTextEl.textContent = act.title || '目前活動主視覺';
+    }
+
+    // 2. 同步更新活動截止日期與時間
+    if (heroDateTextEl) {
+      const now = new Date();
+      const hasDeadline = act.deadline && !isNaN(new Date(act.deadline).getTime());
+      const isExpired = hasDeadline && new Date(act.deadline) <= now;
+
+      if (hasDeadline) {
+        heroDateTextEl.textContent = isExpired 
+          ? `已截止 · ${formatDateTime(act.deadline)}` 
+          : `截止時間：${formatDateTime(act.deadline)}`;
+      } else {
+        heroDateTextEl.textContent = '時間待討論';
+      }
+      if (heroDateBadgeEl) {
+        heroDateBadgeEl.style.display = 'inline-flex';
+      }
+    }
+
+    // 3. 動態轉場：舊照片 opacity 1, scale 1 -> opacity 0, scale 1.03；新照片 opacity 1, scale 1
+    // 動畫時間約 750ms，高級、電影感、流暢，絕無翻牌、旋轉或誇張飛入
+    if (heroTransitionTimeout) {
+      clearTimeout(heroTransitionTimeout);
+      heroTransitionTimeout = null;
+    }
+
+    const coverSource = act.cover ? act.cover.trim() : '';
+
+    if (coverSource) {
+      if (heroWrapperEl) heroWrapperEl.style.display = 'block';
+
+      if (isSlideSwitch && heroImgEl && heroImgPrevEl && heroImgEl.src && heroImgEl.style.display !== 'none') {
+        const oldCover = heroImgEl.src;
+
+        // 舊照片置於上方過渡層 (opacity 1, scale 1)
+        heroImgPrevEl.src = oldCover;
+        heroImgPrevEl.style.display = 'block';
+        heroImgPrevEl.classList.remove('is-animating-out');
+        void heroImgPrevEl.offsetWidth; // 強制重繪
+
+        // 底層換上新照片 (opacity 1, scale 1)
+        heroImgEl.src = coverSource;
+        heroImgEl.alt = act.title ? `${act.title} - 活動主視覺` : '目前活動主視覺照片';
+
+        // 啟動舊照片淡出且微放大 (750ms 電影感 Ken Burns dissolve)
+        heroImgPrevEl.classList.add('is-animating-out');
+
+        heroTransitionTimeout = setTimeout(() => {
+          if (heroImgPrevEl) {
+            heroImgPrevEl.classList.remove('is-animating-out');
+            heroImgPrevEl.style.display = 'none';
+            heroImgPrevEl.removeAttribute('src');
+          }
+          heroTransitionTimeout = null;
+        }, 800);
+      } else {
+        // 首次載入或無舊照片直接切換
+        if (heroImgPrevEl) {
+          heroImgPrevEl.style.display = 'none';
+          heroImgPrevEl.classList.remove('is-animating-out');
+        }
+        if (heroImgEl) {
+          heroImgEl.src = coverSource;
+          heroImgEl.alt = act.title ? `${act.title} - 活動主視覺` : '目前活動主視覺照片';
+        }
+      }
+    } else {
+      // 若該活動沒有照片：保留黑金背景，絕不顯示破圖
+      if (heroImgPrevEl) {
+        heroImgPrevEl.style.display = 'none';
+        heroImgPrevEl.classList.remove('is-animating-out');
+      }
+      if (heroImgEl) {
+        heroImgEl.removeAttribute('src');
+      }
+      if (heroWrapperEl) heroWrapperEl.style.display = 'none';
+    }
+
+    // 4. 同步更新底部圓點指示器 (Indicator)
+    if (heroDotsEl) {
+      const dots = heroDotsEl.querySelectorAll('.carousel-dot');
+      dots.forEach((dot, idx) => {
+        if (idx === heroCarouselIndex) {
+          dot.classList.add('is-active');
+        } else {
+          dot.classList.remove('is-active');
+        }
+      });
+    }
+
+    // 5. 綁定點擊封面照片直接開啟活動詳情
+    if (heroFrameEl) {
+      heroFrameEl.onclick = (e) => {
+        if (heroDidSwipe) return;
+        // 若點擊的是左右箭頭按鈕，不開啟詳情彈窗
+        if (e.target.closest('.hero-carousel-arrow')) return;
+        if (typeof openViewActivityModal === 'function') {
+          openViewActivityModal(act.id);
+        }
+      };
+    }
+  }
+
+  function renderHeroDots() {
+    const heroDotsEl = document.getElementById('heroCarouselDots');
+    if (!heroDotsEl) return;
+
+    heroDotsEl.innerHTML = '';
+    if (heroCarouselActivities.length <= 1) {
+      heroDotsEl.style.display = 'none';
+      return;
+    }
+
+    heroDotsEl.style.display = 'flex';
+    heroCarouselActivities.forEach((act, idx) => {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = `carousel-dot ${idx === heroCarouselIndex ? 'is-active' : ''}`;
+      dot.setAttribute('aria-label', `切換至第 ${idx + 1} 個活動：${act.title || ''}`);
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (idx === heroCarouselIndex) {
+          restartHeroCarousel(); // 重設 5 秒計時
+          return;
+        }
+        renderHeroSlide(idx);
+        restartHeroCarousel(); // 手動圓點切換：立即切換並重新計算 5 秒
+      });
+      heroDotsEl.appendChild(dot);
+    });
+  }
+
+  function startHeroCarousel() {
+    stopHeroCarousel();
+    if (heroCarouselActivities.length > 1) {
+      heroCarouselTimer = setInterval(() => {
+        renderHeroSlide(heroCarouselIndex + 1);
+      }, 5000);
+    }
+  }
+
+  function stopHeroCarousel() {
+    if (heroCarouselTimer) {
+      clearInterval(heroCarouselTimer);
+      heroCarouselTimer = null;
+    }
+  }
+
+  function restartHeroCarousel() {
+    stopHeroCarousel();
+    startHeroCarousel();
+  }
+
+  function bindHeroCarouselEvents() {
+    const heroPrevBtn = document.getElementById('heroCarouselPrev');
+    const heroNextBtn = document.getElementById('heroCarouselNext');
+    const heroFrameEl = document.getElementById('heroVisualFrame');
+
+    // 桌面版左右箭頭切換
+    if (heroPrevBtn) {
+      heroPrevBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        renderHeroSlide(heroCarouselIndex - 1);
+        restartHeroCarousel(); // 重設 5 秒計時
+      });
+    }
+
+    if (heroNextBtn) {
+      heroNextBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        renderHeroSlide(heroCarouselIndex + 1);
+        restartHeroCarousel(); // 重設 5 秒計時
+      });
+    }
+
+    // 手機版觸控滑動切換 (Touch Swipe)
+    if (heroFrameEl) {
+      heroFrameEl.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches.length > 0) {
+          heroTouchStartX = e.touches[0].clientX;
+          heroTouchStartY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      heroFrameEl.addEventListener('touchend', (e) => {
+        if (e.changedTouches && e.changedTouches.length > 0) {
+          heroTouchEndX = e.changedTouches[0].clientX;
+          heroTouchEndY = e.changedTouches[0].clientY;
+          handleHeroSwipe();
+        }
+      }, { passive: true });
+    }
+
+    // 視窗離開或切換分頁時暫停輪播，返回時自動恢復
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopHeroCarousel();
+      } else {
+        if (heroCarouselActivities.length > 1) {
+          startHeroCarousel();
+        }
+      }
+    });
+  }
+
+  function handleHeroSwipe() {
+    if (heroCarouselActivities.length <= 1) return;
+    const deltaX = heroTouchEndX - heroTouchStartX;
+    const deltaY = heroTouchEndY - heroTouchStartY;
+    const minSwipeDistance = 35;
+
+    // 水平滑動幅度大於垂直滑動時才觸發切換
+    if (Math.abs(deltaX) > minSwipeDistance && Math.abs(deltaX) > Math.abs(deltaY)) {
+      heroDidSwipe = true;
+      setTimeout(() => { heroDidSwipe = false; }, 350);
+      if (deltaX < 0) {
+        // 向左滑 -> 下一個活動
+        renderHeroSlide(heroCarouselIndex + 1);
+      } else {
+        // 向右滑 -> 上一個活動
+        renderHeroSlide(heroCarouselIndex - 1);
+      }
+      restartHeroCarousel(); // 重設 5 秒計時
+    }
   }
 
   // Helper to build Card DOM
@@ -1836,116 +2210,134 @@ function initGatheringsManager() {
   }
 
   // Handle Delete Confirmation Submit
-  if (deleteActivityForm) {
-    deleteActivityForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (!currentViewingActivityId) return;
+  async function handleConfirmDeleteActivity(e) {
+    if (e && e.preventDefault) e.preventDefault();
 
-      const act = activities.find(a => a.id === currentViewingActivityId);
-      if (!act) {
-        showToast('⚠️ 找不到欲刪除的活動');
-        closeDeleteModal();
+    if (!currentViewingActivityId) {
+      showToast('⚠️ 找不到目前活動，請重新開啟活動。');
+      closeDeleteModal();
+      return;
+    }
+
+    const act = activities.find(a => a.id === currentViewingActivityId);
+    if (!act) {
+      showToast('⚠️ 找不到目前活動，請重新開啟活動。');
+      closeDeleteModal();
+      return;
+    }
+
+    // 檢查是否處於為舊活動補設密碼狀態
+    const isLegacyMode = legacySetPasswordGroup && legacySetPasswordGroup.style.display !== 'none';
+
+    if (isLegacyMode) {
+      const newPwd = inputLegacyNewPassword ? inputLegacyNewPassword.value.trim() : '';
+      const confirmNewPwd = inputLegacyConfirmPassword ? inputLegacyConfirmPassword.value.trim() : '';
+
+      if (!newPwd || newPwd.length < 4) {
+        showToast('⚠️ 刪除密碼至少需 4 位字元');
+        if (inputLegacyNewPassword) inputLegacyNewPassword.focus();
         return;
       }
 
-      // 檢查是否處於為舊活動補設密碼狀態
-      const isLegacyMode = legacySetPasswordGroup && legacySetPasswordGroup.style.display !== 'none';
-
-      if (isLegacyMode) {
-        const newPwd = inputLegacyNewPassword ? inputLegacyNewPassword.value : '';
-        const confirmNewPwd = inputLegacyConfirmPassword ? inputLegacyConfirmPassword.value : '';
-
-        if (!newPwd || newPwd.length < 4) {
-          showToast('⚠️ 刪除密碼至少需 4 位字元');
-          if (inputLegacyNewPassword) inputLegacyNewPassword.focus();
-          return;
-        }
-
-        if (newPwd !== confirmNewPwd) {
-          showToast('⚠️ 兩次輸入的密碼不一致，請重新確認');
-          if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.focus();
-          return;
-        }
-
-        if (!confirm(`⚠️ 確定要為「${act.title}」設定此刪除密碼並立即永久刪除此活動嗎？\n此操作無法復原！`)) {
-          return;
-        }
-
-        if (btnConfirmDeleteActivity) {
-          btnConfirmDeleteActivity.disabled = true;
-          btnConfirmDeleteActivity.textContent = '設定並刪除中...';
-        }
-
-        try {
-          const setRes = await setActivityDeletePasswordOnCloud(act.id, newPwd);
-          if (!setRes.success) {
-            showToast(`⚠️ 設定密碼失敗：${setRes.message || '請重試'}`);
-            return;
-          }
-
-          const delRes = await deleteActivityFromCloud(act.id, newPwd);
-          if (delRes.success) {
-            executeLocalActivityDeletion(act.id, act.title);
-          } else {
-            showToast(`⚠️ 刪除失敗：${delRes.message || '請稍後再試'}`);
-          }
-        } catch (err) {
-          console.error('舊活動設定密碼並刪除異常:', err);
-          showToast('⚠️ 執行刪除時發生異常');
-        } finally {
-          if (btnConfirmDeleteActivity) {
-            btnConfirmDeleteActivity.disabled = false;
-            btnConfirmDeleteActivity.textContent = '確認刪除';
-          }
-        }
+      if (newPwd !== confirmNewPwd) {
+        showToast('⚠️ 兩次輸入的密碼不一致，請重新確認');
+        if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.focus();
         return;
       }
 
-      // 標準密碼驗證刪除
-      const pwd = inputDeletePassword ? inputDeletePassword.value : '';
-      if (!pwd) {
-        showToast('⚠️ 請輸入活動建立時設定的刪除密碼');
-        if (inputDeletePassword) inputDeletePassword.focus();
-        return;
-      }
-
-      if (!confirm(`⚠️ 確定要永久刪除活動「${act.title}」嗎？\n所有選項、投票紀錄、聊天訊息與照片將全數清除，無法復原！`)) {
-        return;
-      }
-
+      // 按鈕進入 loading 狀態，防重複提交
       if (btnConfirmDeleteActivity) {
         btnConfirmDeleteActivity.disabled = true;
-        btnConfirmDeleteActivity.textContent = '驗證密碼刪除中...';
+        btnConfirmDeleteActivity.textContent = '刪除中...';
       }
 
       try {
-        const res = await deleteActivityFromCloud(act.id, pwd);
-        if (res.success) {
+        const setRes = await setActivityDeletePasswordOnCloud(act.id, newPwd);
+        if (!setRes.success) {
+          console.error('setActivityDeletePasswordOnCloud 失敗:', setRes);
+          showToast(`⚠️ 設定密碼失敗：${setRes.message || '請稍後再試。'}`);
+          return;
+        }
+
+        const delRes = await deleteActivityFromCloud(act.id, newPwd);
+        if (delRes && delRes.success) {
           executeLocalActivityDeletion(act.id, act.title);
-        } else if (res.error === 'NO_PASSWORD_SET') {
-          // 早期舊活動尚未設定密碼，提示使用者進行補設
-          showToast('此活動尚未設定刪除密碼，請先設定刪除密碼。');
-          if (deletePasswordGroup) deletePasswordGroup.style.display = 'none';
-          if (legacySetPasswordGroup) legacySetPasswordGroup.style.display = 'block';
-          if (inputLegacyNewPassword) setTimeout(() => inputLegacyNewPassword.focus(), 100);
-        } else if (res.error === 'INVALID_PASSWORD') {
-          showToast('❌ 刪除密碼錯誤，無法刪除活動');
-          if (inputDeletePassword) {
-            inputDeletePassword.value = '';
-            inputDeletePassword.focus();
-          }
         } else {
-          showToast(`⚠️ 刪除失敗：${res.message || '驗證未通過'}`);
+          console.error('deleteActivityFromCloud 失敗:', delRes);
+          showToast(`⚠️ 刪除失敗：${delRes?.message || '請稍後再試。'}`);
         }
       } catch (err) {
-        console.error('刪除活動異常:', err);
-        showToast('⚠️ 刪除活動時發生未預期異常');
+        console.error('舊活動設定密碼並刪除異常:', err);
+        showToast('⚠️ 刪除失敗，請稍後再試。');
       } finally {
         if (btnConfirmDeleteActivity) {
           btnConfirmDeleteActivity.disabled = false;
           btnConfirmDeleteActivity.textContent = '確認刪除';
         }
       }
+      return;
+    }
+
+    // 標準密碼驗證刪除
+    const pwd = inputDeletePassword ? inputDeletePassword.value.trim() : '';
+    if (!pwd) {
+      showToast('⚠️ 請輸入活動建立時設定的刪除密碼');
+      if (inputDeletePassword) inputDeletePassword.focus();
+      return;
+    }
+
+    // 按鈕進入 loading 狀態，防重複提交
+    if (btnConfirmDeleteActivity) {
+      btnConfirmDeleteActivity.disabled = true;
+      btnConfirmDeleteActivity.textContent = '刪除中...';
+    }
+
+    try {
+      const res = await deleteActivityFromCloud(act.id, pwd);
+      if (res && res.success) {
+        executeLocalActivityDeletion(act.id, act.title);
+      } else if (res && (res.error === 'INVALID_PASSWORD' || res.message?.includes('密碼錯誤') || res.message?.includes('password'))) {
+        showToast('❌ 刪除密碼錯誤，請重新輸入。');
+        if (inputDeletePassword) {
+          inputDeletePassword.value = '';
+          inputDeletePassword.focus();
+        }
+      } else if (res && res.error === 'NO_PASSWORD_SET') {
+        showToast('此活動尚未設定刪除密碼，請先設定刪除密碼。');
+        if (deletePasswordGroup) deletePasswordGroup.style.display = 'none';
+        if (legacySetPasswordGroup) legacySetPasswordGroup.style.display = 'block';
+        if (inputLegacyNewPassword) setTimeout(() => inputLegacyNewPassword.focus(), 100);
+      } else {
+        const errMsg = res?.message || '刪除失敗，請稍後再試。';
+        console.error('刪除活動失敗:', res);
+        showToast(`⚠️ ${errMsg}`);
+      }
+    } catch (err) {
+      console.error('刪除活動異常:', err);
+      showToast('⚠️ 刪除失敗，請稍後再試。');
+    } finally {
+      if (btnConfirmDeleteActivity) {
+        btnConfirmDeleteActivity.disabled = false;
+        btnConfirmDeleteActivity.textContent = '確認刪除';
+      }
+    }
+  }
+
+  // 綁定確認刪除按鈕點擊與表單送出（雙重保障）
+  if (btnConfirmDeleteActivity) {
+    btnConfirmDeleteActivity.addEventListener('click', handleConfirmDeleteActivity);
+  }
+  if (deleteActivityForm) {
+    deleteActivityForm.addEventListener('submit', handleConfirmDeleteActivity);
+  }
+  if (inputDeletePassword) {
+    inputDeletePassword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleConfirmDeleteActivity(e);
+    });
+  }
+  if (inputLegacyConfirmPassword) {
+    inputLegacyConfirmPassword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleConfirmDeleteActivity(e);
     });
   }
 

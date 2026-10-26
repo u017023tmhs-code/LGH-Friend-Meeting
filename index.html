@@ -155,15 +155,43 @@
           </div>
         </div>
 
-        <!-- Main Headlines -->
-        <div class="hero-content">
-          <h1 class="hero-title">
-            一起出去玩，<br class="mobile-break">
-            <span class="gold-gradient-text">留下每一次美好回憶。</span>
-          </h1>
-          <p class="hero-subtitle">
-            聚會、選擇、聊天，以及我們共同留下的回憶。
-          </p>
+        <!-- Hero Activity Visual Photo (大型活動照片 Hero Banner) -->
+        <div class="hero-visual-wrapper" id="heroVisualWrapper">
+          <div class="hero-visual-frame" id="heroVisualFrame" title="點擊查看活動詳情">
+            <img id="heroCoverImgPrev" class="hero-cover-image hero-cover-layer-prev" src="" alt="" style="display: none;" />
+            <img id="heroCoverImg" class="hero-cover-image hero-cover-layer-main" src="" alt="目前活動主視覺照片" />
+            <div class="hero-visual-overlay"></div>
+
+            <!-- Top Right: Activity Date Badge -->
+            <div class="hero-visual-date-badge" id="heroVisualDateBadge">
+              <span class="hero-date-icon">⏰</span>
+              <span id="heroVisualDateText">截止時間：2026/10/30 23:59</span>
+            </div>
+
+            <!-- Bottom Left: 活動標題與副標 -->
+            <div class="hero-banner-content">
+              <h1 class="hero-banner-title">
+                <span class="hero-activity-title" id="heroActivityTitle">陽明山星空包棟歡聚之夜</span>
+              </h1>
+              <p class="hero-banner-subtitle">
+                聚會、選擇、聊天，以及我們共同留下的回憶。
+              </p>
+            </div>
+
+            <!-- Compatibility Tag for script.js -->
+            <span id="heroVisualTagText" style="display: none;"></span>
+
+            <!-- Carousel Left & Right Arrow Buttons -->
+            <button type="button" class="hero-carousel-arrow prev" id="heroCarouselPrev" aria-label="上一個活動" title="上一個活動" style="display: none;">
+              <span class="arrow-symbol">‹</span>
+            </button>
+            <button type="button" class="hero-carousel-arrow next" id="heroCarouselNext" aria-label="下一個活動" title="下一個活動" style="display: none;">
+              <span class="arrow-symbol">›</span>
+            </button>
+          </div>
+
+          <!-- Carousel Dots Indicator (底部指示圓點) -->
+          <div class="hero-carousel-dots" id="heroCarouselDots" aria-label="活動輪播指示器" style="display: none;"></div>
         </div>
 
         <!-- Hero Actions -->
@@ -493,6 +521,18 @@
         </div>
 
         <div class="form-group">
+          <label for="locationInput">活動地點 <span class="optional-tag">（選填）</span></label>
+          <div class="location-input-group">
+            <input type="text" id="locationInput" placeholder="例如：屋馬燒肉 崇德店 或 審計新村" class="form-input" maxlength="100">
+            <button type="button" class="btn-preview-map" id="btnPreviewMap" title="預覽 Google 地圖搜尋結果">
+              <span class="btn-map-icon">🗺️</span>
+              <span>預覽地圖</span>
+            </button>
+          </div>
+          <span class="field-hint">輸入聚會餐廳、景點或地址，可點擊「預覽地圖」測試 Google 地圖搜尋結果</span>
+        </div>
+
+        <div class="form-group">
           <label>活動封面（支援 JPG、PNG、WEBP）</label>
           <div class="cover-uploader-box" id="coverUploaderBox">
             <input type="file" id="coverFileInput" accept="image/jpeg,image/png,image/webp" class="cover-file-input">
@@ -600,6 +640,10 @@
               <div class="meta-block">
                 <span class="meta-label">建立人</span>
                 <span class="meta-val" id="reviewCreator">冠宏</span>
+              </div>
+              <div class="meta-block">
+                <span class="meta-label">活動地點</span>
+                <span class="meta-val" id="reviewLocation">未設定地點</span>
               </div>
               <div class="meta-block">
                 <span class="meta-label">截止日期</span>
@@ -843,7 +887,7 @@
           <p class="delete-modal-warning">⚠️ 此操作無法復原。將永久刪除此活動及其所有投票選項、好友投票紀錄、聊天室訊息與回憶照片。</p>
         </div>
 
-        <form class="delete-activity-form" id="deleteActivityForm" onsubmit="return false;">
+        <form class="delete-activity-form" id="deleteActivityForm">
           <!-- 標準情況：輸入活動建立時之刪除密碼 -->
           <div id="deletePasswordGroup">
             <div class="form-group">
@@ -889,7 +933,7 @@
 
           <div class="delete-modal-actions">
             <button type="button" class="btn-cancel-glass" id="btnCancelDelete">取消</button>
-            <button type="submit" class="btn-confirm-delete" id="btnConfirmDeleteActivity">
+            <button type="button" class="btn-confirm-delete" id="btnConfirmDeleteActivity">
               <span class="btn-text">確認刪除</span>
             </button>
           </div>
@@ -1013,6 +1057,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- Scripts -->
-  <script src="script.js?v=20260925_del_v4"></script>
+  <script src="script.js?v=20261002_hero_v3"></script>
 </body>
 </html>
