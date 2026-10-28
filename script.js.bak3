@@ -1,0 +1,3926 @@
+/**
+ * 賴冠宏專屬網站 | Main JavaScript
+ * Features:
+ * 1. Ambient Golden Dust Canvas
+ * 2. Sticky Header & Mobile Drawer
+ * 3. LocalStorage Activity Store (with 2 Pre-seeded Demo Activities)
+ * 4. Step-by-Step Activity Creator (Step 1: Info -> Step 2: Options -> Step 3: Read-only Confirmation)
+ * 5. Instant JPG/PNG/WEBP Image Upload & Preset Cover Fallback
+ * 6. Dynamic Gathering Cards under Hero (✨ 正在揪團) with 16:9 Aspect Ratio & Hover Micro-float
+ * 7. Activity Detail & Selection (Voting) Feature:
+ *    - View Cover, Title, Host, Deadline, Status
+ *    - Real-time display of Option voter counts & ALL friend names (誰選了什麼)
+ *    - "我要選擇" interactive flow: Input name -> Multi-select options -> Submit
+ *    - Duplicate prevention: Alerts "你已經完成選擇。" if same name submits again
+ *    - Immutable rules: friends cannot modify activity title, options, deadline, or others' votes
+ * 8. LocalStorage Selections persistence (activityId, optionId, userName, createdAt)
+ * 9. Toast Notifications
+ */
+
+// Storage Keys
+const STORAGE_KEY_ACTIVITIES = 'LGH_EXCLUSIVE_GATHERINGS_V1';
+const STORAGE_KEY_SELECTIONS = 'LGH_EXCLUSIVE_SELECTIONS_V1';
+const STORAGE_KEY_MESSAGES = 'LGH_EXCLUSIVE_MESSAGES_V1';
+const STORAGE_KEY_CHAT_USER = 'LGH_EXCLUSIVE_CHAT_USER_V1';
+const STORAGE_KEY_PHOTOS = 'LGH_EXCLUSIVE_PHOTOS_V1';
+const STORAGE_KEY_DELETED_ACTIVITIES = 'LGH_EXCLUSIVE_DELETED_ACTIVITIES_V1';
+
+function getDeletedActivityIds() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_DELETED_ACTIVITIES);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function markActivityAsDeleted(activityId) {
+  try {
+    const set = getDeletedActivityIds();
+    set.add(activityId);
+    localStorage.setItem(STORAGE_KEY_DELETED_ACTIVITIES, JSON.stringify([...set]));
+  } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initAmbientParticles();
+  initHeaderScroll();
+  initMobileDrawer();
+  initGatheringsManager();
+  initSmoothScrollSpy();
+});
+
+/* ==========================================================================
+   1. Luxury Ambient Particle System (Golden Dust Canvas)
+   ========================================================================== */
+function initAmbientParticles() {
+  const canvas = document.getElementById('particleCanvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  let width, height;
+  let particles = [];
+  const PARTICLE_COUNT = 36;
+
+  function resizeCanvas() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  }
+
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  class Particle {
+    constructor() {
+      this.reset(true);
+    }
+
+    reset(initial = false) {
+      this.x = Math.random() * width;
+      this.y = initial ? Math.random() * height : height + 10;
+      this.radius = Math.random() * 1.5 + 0.5;
+      this.speedY = -(Math.random() * 0.3 + 0.12);
+      this.speedX = (Math.random() - 0.5) * 0.2;
+      this.alpha = Math.random() * 0.5 + 0.15;
+      this.fadeSpeed = Math.random() * 0.003 + 0.002;
+      this.isFading = Math.random() > 0.5;
+    }
+
+    update() {
+      this.x += this.speedX;
+      this.y += this.speedY;
+
+      if (this.isFading) {
+        this.alpha -= this.fadeSpeed;
+        if (this.alpha <= 0.1) this.isFading = false;
+      } else {
+        this.alpha += this.fadeSpeed;
+        if (this.alpha >= 0.6) this.isFading = true;
+      }
+
+      if (this.y < -10 || this.x < -10 || this.x > width + 10) {
+        this.reset();
+      }
+    }
+
+    draw() {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(245, 215, 127, ${this.alpha})`;
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = 'rgba(212, 175, 55, 0.4)';
+      ctx.fill();
+    }
+  }
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    particles.push(new Particle());
+  }
+
+  function animate() {
+    ctx.clearRect(0, 0, width, height);
+    particles.forEach(p => {
+      p.update();
+      p.draw();
+    });
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+}
+
+/* ==========================================================================
+   2. Header Scroll & Mobile Drawer
+   ========================================================================== */
+function initHeaderScroll() {
+  const header = document.getElementById('siteHeader');
+  if (!header) return;
+
+  const handleScroll = () => {
+    if (window.scrollY > 40) {
+      header.classList.add('scrolled');
+    } else {
+      header.classList.remove('scrolled');
+    }
+  };
+
+  window.addEventListener('scroll', handleScroll, { passive: true });
+  handleScroll();
+}
+
+function initMobileDrawer() {
+  const hamburgerBtn = document.getElementById('hamburgerBtn');
+  const mobileDrawer = document.getElementById('mobileDrawer');
+  const drawerCloseBtn = document.getElementById('drawerCloseBtn');
+  const mobileLinks = document.querySelectorAll('.mobile-nav-link');
+  const mobileCreateBtn = document.getElementById('btnOpenCreateModalMobile');
+
+  if (!hamburgerBtn || !mobileDrawer) return;
+
+  function openDrawer() {
+    mobileDrawer.classList.add('open');
+    hamburgerBtn.classList.add('is-active');
+    hamburgerBtn.setAttribute('aria-expanded', 'true');
+    mobileDrawer.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeDrawer() {
+    mobileDrawer.classList.remove('open');
+    hamburgerBtn.classList.remove('is-active');
+    hamburgerBtn.setAttribute('aria-expanded', 'false');
+    mobileDrawer.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+
+  hamburgerBtn.addEventListener('click', () => {
+    if (mobileDrawer.classList.contains('open')) {
+      closeDrawer();
+    } else {
+      openDrawer();
+    }
+  });
+
+  if (drawerCloseBtn) drawerCloseBtn.addEventListener('click', closeDrawer);
+
+  mobileDrawer.addEventListener('click', (e) => {
+    if (e.target === mobileDrawer) closeDrawer();
+  });
+
+  mobileLinks.forEach(link => link.addEventListener('click', closeDrawer));
+
+  if (mobileCreateBtn) {
+    mobileCreateBtn.addEventListener('click', () => {
+      closeDrawer();
+    });
+  }
+}
+
+/* ==========================================================================
+   3. Gatherings Store & Activity Selection Manager
+   ========================================================================== */
+function initGatheringsManager() {
+  // Activity, Selections, Messages, and Photos Storage State
+  let activities = loadActivities();
+  let selections = loadSelections();
+  let messages = loadMessages();
+  let photos = loadPhotos();
+
+  // Hero Carousel State
+  let heroCarouselIndex = 0;
+  let heroCarouselTimer = null;
+  let heroCarouselActivities = [];
+  let heroTouchStartX = 0;
+  let heroTouchStartY = 0;
+  let heroTouchEndX = 0;
+  let heroTouchEndY = 0;
+  let heroDidSwipe = false;
+  let heroCarouselListenersBound = false;
+  let heroLastRenderedIndex = -1;
+  let heroTransitionTimeout = null;
+
+  // 註冊 Supabase 雲端資料庫雙向同步
+  initSupabaseCloudSync({
+    onActivitiesSync: (cloudActivities) => {
+      const deletedIds = getDeletedActivityIds();
+      activities = cloudActivities.filter(a => !deletedIds.has(a.id));
+      saveActivities(activities);
+      renderGatheringCards();
+      if (currentViewingActivityId) {
+        const act = activities.find(a => a.id === currentViewingActivityId);
+        if (act) {
+          renderDetailOptionsAndVoters(act);
+        } else {
+          // 目前檢視之活動已被其他裝置或本人刪除
+          if (typeof closeDeleteModal === 'function') closeDeleteModal();
+          if (typeof closeViewModal === 'function') closeViewModal();
+          showToast('ℹ️ 目前檢視的活動已自雲端資料庫刪除');
+        }
+      }
+    },
+    onSelectionsSync: (cloudSelections) => {
+      selections = cloudSelections;
+      saveSelections(selections);
+      if (currentViewingActivityId) {
+        const act = activities.find(a => a.id === currentViewingActivityId);
+        if (act) renderDetailOptionsAndVoters(act);
+      }
+      renderGatheringCards();
+    },
+    onMessagesSync: (cloudMessages) => {
+      messages = cloudMessages;
+      saveMessages(messages);
+      if (currentViewingActivityId) {
+        renderActivityChat(currentViewingActivityId);
+      }
+    },
+    onPhotosSync: (cloudPhotos) => {
+      photos = cloudPhotos;
+      savePhotos(photos);
+      renderGatheringCards();
+      if (currentViewingActivityId) {
+        const act = activities.find(a => a.id === currentViewingActivityId);
+        const now = new Date();
+        const isExpired = act && !isNaN(new Date(act.deadline).getTime()) && new Date(act.deadline) <= now;
+        renderActivityPhotos(currentViewingActivityId, isExpired);
+      }
+    }
+  });
+
+  // Temporary wizard state
+  let currentStep = 1;
+  let customCoverDataUrl = '';
+  let currentOptions = [];
+
+  // Detail modal state
+  let currentViewingActivityId = null;
+
+  // DOM Elements - Main View
+  const gridContainer = document.getElementById('activityGridContainer');
+  const createModal = document.getElementById('createModal');
+  const viewModal = document.getElementById('viewActivityModal');
+
+  // Trigger buttons
+  const triggerCreateBtns = [
+    document.getElementById('btnOpenCreateModalHeader'),
+    document.getElementById('btnOpenCreateModalHero'),
+    document.getElementById('btnOpenCreateModalGathering'),
+    document.getElementById('btnOpenCreateModalMobile'),
+  ];
+
+  // Wizard Elements
+  const creatorInput = document.getElementById('creatorInput');
+  const titleInput = document.getElementById('titleInput');
+  const locationInput = document.getElementById('locationInput');
+  const btnPreviewMap = document.getElementById('btnPreviewMap');
+  const coverFileInput = document.getElementById('coverFileInput');
+  const uploaderIdleState = document.getElementById('uploaderIdleState');
+  const uploaderPreviewState = document.getElementById('uploaderPreviewState');
+  const coverPreviewImg = document.getElementById('coverPreviewImg');
+  const btnRemoveCover = document.getElementById('btnRemoveCover');
+  const deadlineInput = document.getElementById('deadlineInput');
+  const deletePasswordInput = document.getElementById('deletePasswordInput');
+  const confirmDeletePasswordInput = document.getElementById('confirmDeletePasswordInput');
+
+  // Delete Activity Modal Elements (🗑️ 活動刪除)
+  const btnOpenDeleteModal = document.getElementById('btnOpenDeleteModal');
+  const deleteActivityModal = document.getElementById('deleteActivityModal');
+  const btnCloseDeleteModal = document.getElementById('btnCloseDeleteModal');
+  const btnCancelDelete = document.getElementById('btnCancelDelete');
+  const btnConfirmDeleteActivity = document.getElementById('btnConfirmDeleteActivity');
+  const deleteActivityForm = document.getElementById('deleteActivityForm');
+  const inputDeletePassword = document.getElementById('inputDeletePassword');
+  const deletePasswordGroup = document.getElementById('deletePasswordGroup');
+  const legacySetPasswordGroup = document.getElementById('legacySetPasswordGroup');
+  const inputLegacyNewPassword = document.getElementById('inputLegacyNewPassword');
+  const inputLegacyConfirmPassword = document.getElementById('inputLegacyConfirmPassword');
+
+  // Step Indicators & Panels
+  const stepPanels = [
+    document.getElementById('stepPanel1'),
+    document.getElementById('stepPanel2'),
+    document.getElementById('stepPanel3'),
+  ];
+  const stepIndicators = [
+    document.getElementById('stepIndicator1'),
+    document.getElementById('stepIndicator2'),
+    document.getElementById('stepIndicator3'),
+  ];
+  const stepConnectors = [
+    document.getElementById('stepConnector1'),
+    document.getElementById('stepConnector2'),
+  ];
+
+  // Step 1 buttons
+  const btnStep1Next = document.getElementById('btnStep1Next');
+  const btnCancelStepModal = document.getElementById('btnCancelStepModal');
+
+  // Step 2 buttons & inputs
+  const optionTextInput = document.getElementById('optionTextInput');
+  const btnAddOption = document.getElementById('btnAddOption');
+  const optionsListContainer = document.getElementById('optionsListContainer');
+  const optionsCounter = document.getElementById('optionsCounter');
+  const presetChips = document.querySelectorAll('.preset-chip');
+  const btnStep2Prev = document.getElementById('btnStep2Prev');
+  const btnStep2Next = document.getElementById('btnStep2Next');
+
+  // Step 3 buttons & preview elements
+  const reviewCoverImg = document.getElementById('reviewCoverImg');
+  const reviewTitle = document.getElementById('reviewTitle');
+  const reviewCreator = document.getElementById('reviewCreator');
+  const reviewLocation = document.getElementById('reviewLocation');
+  const reviewDeadline = document.getElementById('reviewDeadline');
+  const reviewOptionsChips = document.getElementById('reviewOptionsChips');
+  const btnStep3Prev = document.getElementById('btnStep3Prev');
+  const btnFinalCreate = document.getElementById('btnFinalCreate');
+
+  // Detail Modal Elements
+  const modalCloseBtn = document.getElementById('modalCloseBtn');
+  const viewModalCloseBtn = document.getElementById('viewModalCloseBtn');
+  const btnCloseViewModal = document.getElementById('btnCloseViewModal');
+
+  // Detail Voting Form Elements
+  const btnToggleVoteForm = document.getElementById('btnToggleVoteForm');
+  const voteFormSection = document.getElementById('voteFormSection');
+  const voterNameInput = document.getElementById('voterNameInput');
+  const voterCheckboxList = document.getElementById('voterCheckboxList');
+  const btnSubmitVote = document.getElementById('btnSubmitVote');
+  const voteFeedbackMsg = document.getElementById('voteFeedbackMsg');
+
+  // Chatroom Elements (💬 活動聊天室)
+  const chatMessageCountBadge = document.getElementById('chatMessageCountBadge');
+  const currentChatUserDisplay = document.getElementById('currentChatUserDisplay');
+  const btnSwitchChatIdentity = document.getElementById('btnSwitchChatIdentity');
+  const chatStreamContainer = document.getElementById('chatStreamContainer');
+  const chatInputForm = document.getElementById('chatInputForm');
+  const chatTextInput = document.getElementById('chatTextInput');
+  const btnSendMessage = document.getElementById('btnSendMessage');
+
+  // Chat Identity Modal Elements
+  const chatNameModal = document.getElementById('chatNameModal');
+  const btnCloseChatNameModal = document.getElementById('btnCloseChatNameModal');
+  const btnCancelChatName = document.getElementById('btnCancelChatName');
+  const chatNameForm = document.getElementById('chatNameForm');
+  const chatUserNameInput = document.getElementById('chatUserNameInput');
+  const btnConfirmChatName = document.getElementById('btnConfirmChatName');
+
+  // Chat State
+  let currentChatUser = loadChatUser();
+
+  // Set default deadline to 7 days from now
+  setDefaultDeadlineInput();
+
+  // Initial render of home page activity cards
+  renderGatheringCards();
+
+  /* ------------------- Open / Close Create Modal ------------------- */
+  function openCreateModal() {
+    resetWizard();
+    createModal.classList.add('open');
+    createModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => {
+      if (titleInput) titleInput.focus();
+    }, 150);
+  }
+
+  function closeCreateModal() {
+    createModal.classList.remove('open');
+    createModal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  }
+
+  triggerCreateBtns.forEach(btn => {
+    if (btn) btn.addEventListener('click', openCreateModal);
+  });
+
+  if (modalCloseBtn) modalCloseBtn.addEventListener('click', closeCreateModal);
+  if (btnCancelStepModal) btnCancelStepModal.addEventListener('click', closeCreateModal);
+
+  createModal.addEventListener('click', (e) => {
+    if (e.target === createModal) closeCreateModal();
+  });
+
+  /* ------------------- Step Wizard Navigation ------------------- */
+  function goToStep(step) {
+    currentStep = step;
+
+    stepPanels.forEach((panel, idx) => {
+      if (idx + 1 === step) {
+        panel.style.display = 'flex';
+        panel.classList.add('active');
+      } else {
+        panel.style.display = 'none';
+        panel.classList.remove('active');
+      }
+    });
+
+    stepIndicators.forEach((indicator, idx) => {
+      const num = idx + 1;
+      indicator.classList.remove('active', 'completed');
+      if (num === step) {
+        indicator.classList.add('active');
+      } else if (num < step) {
+        indicator.classList.add('completed');
+      }
+    });
+
+    stepConnectors.forEach((conn, idx) => {
+      if (idx + 1 < step) {
+        conn.classList.add('filled');
+      } else {
+        conn.classList.remove('filled');
+      }
+    });
+  }
+
+  function resetWizard() {
+    goToStep(1);
+    if (titleInput) titleInput.value = '';
+    if (locationInput) locationInput.value = '';
+    if (creatorInput) creatorInput.value = '冠宏';
+    if (deletePasswordInput) deletePasswordInput.value = '';
+    if (confirmDeletePasswordInput) confirmDeletePasswordInput.value = '';
+    setDefaultDeadlineInput();
+    clearCoverUpload();
+    currentOptions = [];
+    renderOptionsList();
+  }
+
+  function setDefaultDeadlineInput() {
+    if (!deadlineInput) return;
+    const now = new Date();
+    now.setDate(now.getDate() + 7);
+    now.setHours(23, 59, 0, 0);
+
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+
+    deadlineInput.value = `${year}-${month}-${day}T${hours}:${minutes}`;
+  }
+
+  /* ------------------- Image Upload Handling ------------------- */
+  if (coverFileInput) {
+    coverFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        showToast('⚠️ 僅支援 JPG、PNG、WEBP 格式圖片');
+        coverFileInput.value = '';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (loadEvt) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxW = 960;
+          let targetW = img.width;
+          let targetH = img.height;
+
+          if (targetW > maxW) {
+            targetH = Math.round((targetH * maxW) / targetW);
+            targetW = maxW;
+          }
+
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+
+          customCoverDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+          coverPreviewImg.src = customCoverDataUrl;
+          uploaderIdleState.style.display = 'none';
+          uploaderPreviewState.style.display = 'block';
+        };
+        img.src = loadEvt.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (btnRemoveCover) {
+    btnRemoveCover.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearCoverUpload();
+    });
+  }
+
+  function clearCoverUpload() {
+    customCoverDataUrl = '';
+    if (coverFileInput) coverFileInput.value = '';
+    if (coverPreviewImg) coverPreviewImg.src = '';
+    if (uploaderIdleState) uploaderIdleState.style.display = 'block';
+    if (uploaderPreviewState) uploaderPreviewState.style.display = 'none';
+  }
+
+  /* ------------------- Step 1 -> Step 2 Validation ------------------- */
+  if (btnStep1Next) {
+    btnStep1Next.addEventListener('click', () => {
+      const creator = creatorInput.value.trim();
+      const title = titleInput.value.trim();
+      const deadline = deadlineInput.value;
+      const deletePassword = deletePasswordInput ? deletePasswordInput.value : '';
+      const confirmDeletePassword = confirmDeletePasswordInput ? confirmDeletePasswordInput.value : '';
+
+      if (!creator) {
+        showToast('⚠️ 請輸入建立人姓名（例如：冠宏）');
+        creatorInput.focus();
+        return;
+      }
+
+      if (!title) {
+        showToast('⚠️ 請輸入活動標題');
+        titleInput.focus();
+        return;
+      }
+
+      if (!deadline) {
+        showToast('⚠️ 請選擇活動截止日期與時間');
+        deadlineInput.focus();
+        return;
+      }
+
+      if (!deletePassword) {
+        showToast('⚠️ 請設定活動刪除密碼（用於日後刪除此活動）');
+        if (deletePasswordInput) deletePasswordInput.focus();
+        return;
+      }
+
+      if (deletePassword.length < 4) {
+        showToast('⚠️ 刪除密碼長度至少需 4 位字元');
+        if (deletePasswordInput) deletePasswordInput.focus();
+        return;
+      }
+
+      if (deletePassword !== confirmDeletePassword) {
+        showToast('⚠️ 兩次輸入的刪除密碼不一致，請重新確認');
+        if (confirmDeletePasswordInput) confirmDeletePasswordInput.focus();
+        return;
+      }
+
+      goToStep(2);
+      if (optionTextInput) setTimeout(() => optionTextInput.focus(), 150);
+    });
+  }
+
+  // Google 地圖預覽按鈕事件（方案 A：安全新分頁開啟 Google Maps 搜尋結果）
+  if (btnPreviewMap) {
+    btnPreviewMap.addEventListener('click', () => {
+      const locationText = locationInput ? locationInput.value.trim() : '';
+      if (!locationText) {
+        showToast('⚠️ 請先輸入活動地點，再點擊預覽地圖');
+        if (locationInput) locationInput.focus();
+        return;
+      }
+      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationText)}`;
+      window.open(mapsUrl, '_blank', 'noopener,noreferrer');
+    });
+  }
+
+  if (locationInput) {
+    locationInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const locationText = locationInput.value.trim();
+        if (locationText && btnPreviewMap) {
+          btnPreviewMap.click();
+        }
+      }
+    });
+  }
+
+  /* ------------------- Step 2: Options Management ------------------- */
+  function addOption(text) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    if (currentOptions.includes(trimmed)) {
+      showToast('⚠️ 此選項已在清單中');
+      return;
+    }
+
+    currentOptions.push(trimmed);
+    renderOptionsList();
+    if (optionTextInput) {
+      optionTextInput.value = '';
+      optionTextInput.focus();
+    }
+  }
+
+  if (btnAddOption) {
+    btnAddOption.addEventListener('click', () => {
+      addOption(optionTextInput.value);
+    });
+  }
+
+  if (optionTextInput) {
+    optionTextInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addOption(optionTextInput.value);
+      }
+    });
+  }
+
+  presetChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const text = chip.getAttribute('data-text');
+      addOption(text);
+    });
+  });
+
+  function renderOptionsList() {
+    if (!optionsListContainer) return;
+    optionsListContainer.innerHTML = '';
+
+    if (currentOptions.length === 0) {
+      optionsListContainer.innerHTML = `
+        <div style="text-align: center; padding: 18px 10px; color: var(--text-muted); font-size: 0.88rem;">
+          尚未新增選項。請在上方輸入，或點選常用靈感快速加入！
+        </div>
+      `;
+    } else {
+      currentOptions.forEach((opt, index) => {
+        const row = document.createElement('div');
+        row.className = 'option-item-row';
+        row.innerHTML = `
+          <span class="option-item-text">${index + 1}. ${escapeHTML(opt)}</span>
+          <button type="button" class="btn-delete-option" title="刪除此選項" data-index="${index}">✕</button>
+        `;
+        optionsListContainer.appendChild(row);
+      });
+
+      const deleteBtns = optionsListContainer.querySelectorAll('.btn-delete-option');
+      deleteBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-index'), 10);
+          currentOptions.splice(idx, 1);
+          renderOptionsList();
+        });
+      });
+    }
+
+    if (optionsCounter) {
+      optionsCounter.textContent = `${currentOptions.length} 個選項`;
+    }
+  }
+
+  if (btnStep2Prev) {
+    btnStep2Prev.addEventListener('click', () => goToStep(1));
+  }
+
+  if (btnStep2Next) {
+    btnStep2Next.addEventListener('click', () => {
+      if (currentOptions.length === 0) {
+        showToast('⚠️ 請至少新增 1 個活動選項供好友選擇！');
+        if (optionTextInput) optionTextInput.focus();
+        return;
+      }
+
+      populateStep3Review();
+      goToStep(3);
+    });
+  }
+
+  /* ------------------- Step 3: Populate & Final Create ------------------- */
+  function populateStep3Review() {
+    const title = titleInput.value.trim();
+    const creator = creatorInput.value.trim();
+    const locationVal = locationInput ? locationInput.value.trim() : '';
+    const deadlineVal = deadlineInput.value;
+    const coverUrl = customCoverDataUrl || generateLuxurySvgCover(title, currentOptions[0] || '聚會');
+
+    if (reviewCoverImg) reviewCoverImg.src = coverUrl;
+    if (reviewTitle) reviewTitle.textContent = title;
+    if (reviewCreator) reviewCreator.textContent = creator;
+    if (reviewLocation) reviewLocation.textContent = locationVal || '未設定地點';
+    if (reviewDeadline) reviewDeadline.textContent = formatDateTime(deadlineVal);
+
+    if (reviewOptionsChips) {
+      reviewOptionsChips.innerHTML = currentOptions.map(opt => `
+        <span class="review-chip">${escapeHTML(opt)}</span>
+      `).join('');
+    }
+  }
+
+  if (btnStep3Prev) {
+    btnStep3Prev.addEventListener('click', () => goToStep(2));
+  }
+
+  if (btnFinalCreate) {
+    btnFinalCreate.addEventListener('click', async () => {
+      const title = titleInput.value.trim();
+      const creator = creatorInput.value.trim();
+      const locationVal = locationInput ? locationInput.value.trim() : '';
+      const deadlineVal = deadlineInput.value;
+      const deletePassword = deletePasswordInput ? deletePasswordInput.value : '';
+      const coverUrl = customCoverDataUrl || generateLuxurySvgCover(title, currentOptions[0] || '聚會');
+
+      if (!deletePassword || deletePassword.length < 4) {
+        showToast('⚠️ 請返回第一步設定有效的刪除密碼（至少 4 位）');
+        goToStep(1);
+        return;
+      }
+
+      const newActivity = {
+        id: 'lgh_act_' + Date.now(),
+        title: title,
+        creator: creator,
+        location: locationVal,
+        cover: coverUrl,
+        deadline: deadlineVal,
+        options: [...currentOptions],
+        createdAt: new Date().toISOString(),
+        isReadOnly: true // Immutable as requested
+      };
+
+      // 防止重複點擊，切換按鈕狀態
+      const originalBtnText = btnFinalCreate.textContent;
+      btnFinalCreate.disabled = true;
+      btnFinalCreate.textContent = '雲端同步發布中...';
+
+      try {
+        // 先嘗試寫入 Supabase 雲端資料庫（透過後端 RPC 安全計算 bcrypt 雜湊）
+        const cloudResult = await syncNewActivityToCloud(newActivity, deletePassword);
+
+        if (cloudResult && cloudResult.success) {
+          // 只有在 INSERT 成功時：
+          // 1. 才寫入記憶體與本機 localStorage 快取（絕不含明文刪除密碼）
+          if (!activities.some(a => a.id === newActivity.id)) {
+            activities.unshift(newActivity);
+            saveActivities(activities);
+          }
+
+          // 2. 才更新畫面
+          renderGatheringCards();
+
+          // 3. 才關閉建立視窗
+          closeCreateModal();
+
+          // 4. 才顯示建立成功提示
+          showToast(`✨「${title}」已成功發布至雲端資料庫！已設定安全刪除密碼。`);
+
+          const gatheringSection = document.getElementById('gatherings');
+          if (gatheringSection) {
+            setTimeout(() => {
+              gatheringSection.scrollIntoView({ behavior: 'smooth' });
+            }, 200);
+          }
+        } else {
+          // 寫入失敗：不要假裝成功、不要關閉視窗、保留使用者已輸入內容
+          const errMsg = cloudResult?.error?.message || cloudResult?.message || '雲端資料庫連線失敗或尚未就緒';
+          console.error('發布活動至 Supabase 失敗:', cloudResult?.error || errMsg);
+          showToast(`⚠️ 發布失敗：${errMsg}。內容已保留，請重試。`);
+        }
+      } catch (err) {
+        console.error('發布活動時發生未預期錯誤:', err);
+        showToast('⚠️ 發布時發生異常，內容已保留，請稍後再試。');
+      } finally {
+        btnFinalCreate.disabled = false;
+        btnFinalCreate.textContent = originalBtnText;
+      }
+    });
+  }
+
+  /* ------------------- Render Gathering Cards (Separated into Active & Archived) ------------------- */
+  function renderGatheringCards() {
+    const activeGrid = document.getElementById('activityGridContainer');
+    const archivedGrid = document.getElementById('archivedGridContainer');
+    const archivedCounter = document.getElementById('archivedCounter');
+
+    if (activeGrid) activeGrid.innerHTML = '';
+    if (archivedGrid) archivedGrid.innerHTML = '';
+
+    const now = new Date();
+
+    // Split activities into Active (正在揪團) and Archived (回憶紀錄)
+    const activeActivities = activities.filter(act => {
+      const d = new Date(act.deadline);
+      return isNaN(d.getTime()) || d > now;
+    });
+
+    const archivedActivities = activities.filter(act => {
+      const d = new Date(act.deadline);
+      return !isNaN(d.getTime()) && d <= now;
+    });
+
+    // Update Archived Counter
+    if (archivedCounter) {
+      archivedCounter.textContent = `共 ${archivedActivities.length} 場歷史回憶`;
+    }
+
+    // 1. Render Active Activities (✨ 正在揪團)
+    if (activeGrid) {
+      if (activeActivities.length === 0) {
+        activeGrid.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 48px 20px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed var(--glass-border);">
+            <p style="color: var(--text-secondary); font-size: 1.05rem; margin-bottom: 12px;">目前尚未有進行中的揪團活動</p>
+            <button class="btn-create-secondary" onclick="document.getElementById('btnOpenCreateModalGathering').click()">＋ 立即發起新揪團</button>
+          </div>
+        `;
+      } else {
+        activeActivities.forEach((act, idx) => {
+          const cardEl = createActivityCardElement(act, false);
+          cardEl.style.animationDelay = `${idx * 0.08}s`;
+          activeGrid.appendChild(cardEl);
+        });
+      }
+    }
+
+    // 2. Render Archived Activities (📖 回憶紀錄)
+    if (archivedGrid) {
+      if (archivedActivities.length === 0) {
+        archivedGrid.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 36px 20px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed var(--glass-border);">
+            <p style="color: var(--text-secondary); font-size: 0.96rem;">尚無已截止的活動回憶紀錄</p>
+          </div>
+        `;
+      } else {
+        archivedActivities.forEach((act, idx) => {
+          const cardEl = createActivityCardElement(act, true);
+          cardEl.style.animationDelay = `${idx * 0.08}s`;
+          archivedGrid.appendChild(cardEl);
+        });
+      }
+    }
+
+    // Bind "查看活動" clicks across all cards
+    document.querySelectorAll('.btn-view-activity').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        openViewActivityModal(id);
+      });
+    });
+
+    // 自動同步首頁 Hero 主視覺（支援多活動輪播）
+    try {
+      updateHeroVisual(activeActivities, activities);
+    } catch (heroErr) {
+      console.warn('Hero visual carousel update skipped:', heroErr);
+    }
+  }
+
+  /* ------------------- Hero Dynamic Multi-Activity Carousel Manager ------------------- */
+  function updateHeroVisual(activeActs, allActs) {
+    const heroTitleEl = document.getElementById('heroActivityTitle');
+    const heroWrapperEl = document.getElementById('heroVisualWrapper');
+    const heroPrevBtn = document.getElementById('heroCarouselPrev');
+    const heroNextBtn = document.getElementById('heroCarouselNext');
+    const heroDotsEl = document.getElementById('heroCarouselDots');
+
+    if (!heroTitleEl) return;
+
+    // 優先使用專案活動資料庫中的現有活動清單（若有活動則依序排列）
+    heroCarouselActivities = Array.isArray(allActs) ? allActs.filter(act => act && act.id) : [];
+
+    // 若完全沒有活動：保留原本 Hero 的預設狀態，隱藏照片框，無錯誤
+    if (heroCarouselActivities.length === 0) {
+      stopHeroCarousel();
+      heroTitleEl.textContent = '陽明山星空包棟歡聚之夜';
+      if (heroWrapperEl) heroWrapperEl.style.display = 'none';
+      if (heroPrevBtn) heroPrevBtn.style.display = 'none';
+      if (heroNextBtn) heroNextBtn.style.display = 'none';
+      if (heroDotsEl) heroDotsEl.style.display = 'none';
+      return;
+    }
+
+    // 確保索引值在有效範圍內
+    if (heroCarouselIndex >= heroCarouselActivities.length) {
+      heroCarouselIndex = 0;
+    }
+
+    // 渲染指示圓點 (Dots)
+    renderHeroDots();
+
+    // 依活動數量控制左右箭頭與自動輪播
+    if (heroCarouselActivities.length === 1) {
+      // 只有 1 個活動：不顯示左右箭頭與多餘輪播控制，停止計時器
+      stopHeroCarousel();
+      if (heroPrevBtn) heroPrevBtn.style.display = 'none';
+      if (heroNextBtn) heroNextBtn.style.display = 'none';
+      if (heroDotsEl) heroDotsEl.style.display = 'none';
+    } else {
+      // 2 個以上活動：顯示控制元件並啟用每 5 秒自動輪播
+      if (heroPrevBtn) heroPrevBtn.style.display = 'flex';
+      if (heroNextBtn) heroNextBtn.style.display = 'flex';
+      if (heroDotsEl) heroDotsEl.style.display = 'flex';
+      startHeroCarousel();
+    }
+
+    // 渲染當前活動內容（封面照片、標題、截止日期三者同步更新）
+    renderHeroSlide(heroCarouselIndex);
+
+    // 綁定手動切換事件（桌面箭頭與手機滑動，僅綁定一次）
+    if (!heroCarouselListenersBound) {
+      bindHeroCarouselEvents();
+      heroCarouselListenersBound = true;
+    }
+  }
+
+  function renderHeroSlide(index) {
+    if (!heroCarouselActivities || heroCarouselActivities.length === 0) return;
+
+    // 輪播規則：循環切換（到最後一個活動後，回到第一個活動）
+    const targetIndex = ((index % heroCarouselActivities.length) + heroCarouselActivities.length) % heroCarouselActivities.length;
+    const isSlideSwitch = heroLastRenderedIndex !== -1 && heroLastRenderedIndex !== targetIndex;
+
+    heroCarouselIndex = targetIndex;
+    heroLastRenderedIndex = targetIndex;
+    const act = heroCarouselActivities[heroCarouselIndex];
+
+    const heroTitleEl = document.getElementById('heroActivityTitle');
+    const heroWrapperEl = document.getElementById('heroVisualWrapper');
+    const heroImgEl = document.getElementById('heroCoverImg');
+    const heroImgPrevEl = document.getElementById('heroCoverImgPrev');
+    const heroTagTextEl = document.getElementById('heroVisualTagText');
+    const heroDateTextEl = document.getElementById('heroVisualDateText');
+    const heroDateBadgeEl = document.getElementById('heroVisualDateBadge');
+    const heroFrameEl = document.getElementById('heroVisualFrame');
+    const heroDotsEl = document.getElementById('heroCarouselDots');
+
+    if (!act) return;
+
+    // 1. 標題同步動畫：opacity 0 → 1, translateY(15px) → translateY(0)，約 700ms 高級流暢
+    if (heroTitleEl) {
+      if (isSlideSwitch) {
+        heroTitleEl.classList.add('is-animating-in');
+        heroTitleEl.textContent = act.title || '陽明山星空包棟歡聚之夜';
+        void heroTitleEl.offsetWidth; // 強制重繪以重啟 CSS Transition
+        heroTitleEl.classList.remove('is-animating-in');
+      } else {
+        heroTitleEl.textContent = act.title || '陽明山星空包棟歡聚之夜';
+      }
+    }
+    if (heroTagTextEl) {
+      heroTagTextEl.textContent = act.title || '目前活動主視覺';
+    }
+
+    // 2. 同步更新活動截止日期與時間
+    if (heroDateTextEl) {
+      const now = new Date();
+      const hasDeadline = act.deadline && !isNaN(new Date(act.deadline).getTime());
+      const isExpired = hasDeadline && new Date(act.deadline) <= now;
+
+      if (hasDeadline) {
+        heroDateTextEl.textContent = isExpired 
+          ? `已截止 · ${formatDateTime(act.deadline)}` 
+          : `截止時間：${formatDateTime(act.deadline)}`;
+      } else {
+        heroDateTextEl.textContent = '時間待討論';
+      }
+      if (heroDateBadgeEl) {
+        heroDateBadgeEl.style.display = 'inline-flex';
+      }
+    }
+
+    // 3. 動態轉場：舊照片 opacity 1, scale 1 -> opacity 0, scale 1.03；新照片 opacity 1, scale 1
+    // 動畫時間約 750ms，高級、電影感、流暢，絕無翻牌、旋轉或誇張飛入
+    if (heroTransitionTimeout) {
+      clearTimeout(heroTransitionTimeout);
+      heroTransitionTimeout = null;
+    }
+
+    const coverSource = act.cover ? act.cover.trim() : '';
+
+    if (coverSource) {
+      if (heroWrapperEl) heroWrapperEl.style.display = 'block';
+
+      if (isSlideSwitch && heroImgEl && heroImgPrevEl && heroImgEl.src && heroImgEl.style.display !== 'none') {
+        const oldCover = heroImgEl.src;
+
+        // 舊照片置於上方過渡層 (opacity 1, scale 1)
+        heroImgPrevEl.src = oldCover;
+        heroImgPrevEl.style.display = 'block';
+        heroImgPrevEl.classList.remove('is-animating-out');
+        void heroImgPrevEl.offsetWidth; // 強制重繪
+
+        // 底層換上新照片 (opacity 1, scale 1)
+        heroImgEl.src = coverSource;
+        heroImgEl.alt = act.title ? `${act.title} - 活動主視覺` : '目前活動主視覺照片';
+
+        // 啟動舊照片淡出且微放大 (750ms 電影感 Ken Burns dissolve)
+        heroImgPrevEl.classList.add('is-animating-out');
+
+        heroTransitionTimeout = setTimeout(() => {
+          if (heroImgPrevEl) {
+            heroImgPrevEl.classList.remove('is-animating-out');
+            heroImgPrevEl.style.display = 'none';
+            heroImgPrevEl.removeAttribute('src');
+          }
+          heroTransitionTimeout = null;
+        }, 800);
+      } else {
+        // 首次載入或無舊照片直接切換
+        if (heroImgPrevEl) {
+          heroImgPrevEl.style.display = 'none';
+          heroImgPrevEl.classList.remove('is-animating-out');
+        }
+        if (heroImgEl) {
+          heroImgEl.src = coverSource;
+          heroImgEl.alt = act.title ? `${act.title} - 活動主視覺` : '目前活動主視覺照片';
+        }
+      }
+    } else {
+      // 若該活動沒有照片：保留黑金背景，絕不顯示破圖
+      if (heroImgPrevEl) {
+        heroImgPrevEl.style.display = 'none';
+        heroImgPrevEl.classList.remove('is-animating-out');
+      }
+      if (heroImgEl) {
+        heroImgEl.removeAttribute('src');
+      }
+      if (heroWrapperEl) heroWrapperEl.style.display = 'none';
+    }
+
+    // 4. 同步更新底部圓點指示器 (Indicator)
+    if (heroDotsEl) {
+      const dots = heroDotsEl.querySelectorAll('.carousel-dot');
+      dots.forEach((dot, idx) => {
+        if (idx === heroCarouselIndex) {
+          dot.classList.add('is-active');
+        } else {
+          dot.classList.remove('is-active');
+        }
+      });
+    }
+
+    // 5. 綁定點擊封面照片直接開啟活動詳情
+    if (heroFrameEl) {
+      heroFrameEl.onclick = (e) => {
+        if (heroDidSwipe) return;
+        // 若點擊的是左右箭頭按鈕，不開啟詳情彈窗
+        if (e.target.closest('.hero-carousel-arrow')) return;
+        if (typeof openViewActivityModal === 'function') {
+          openViewActivityModal(act.id);
+        }
+      };
+    }
+  }
+
+  function renderHeroDots() {
+    const heroDotsEl = document.getElementById('heroCarouselDots');
+    if (!heroDotsEl) return;
+
+    heroDotsEl.innerHTML = '';
+    if (heroCarouselActivities.length <= 1) {
+      heroDotsEl.style.display = 'none';
+      return;
+    }
+
+    heroDotsEl.style.display = 'flex';
+    heroCarouselActivities.forEach((act, idx) => {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = `carousel-dot ${idx === heroCarouselIndex ? 'is-active' : ''}`;
+      dot.setAttribute('aria-label', `切換至第 ${idx + 1} 個活動：${act.title || ''}`);
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (idx === heroCarouselIndex) {
+          restartHeroCarousel(); // 重設 5 秒計時
+          return;
+        }
+        renderHeroSlide(idx);
+        restartHeroCarousel(); // 手動圓點切換：立即切換並重新計算 5 秒
+      });
+      heroDotsEl.appendChild(dot);
+    });
+  }
+
+  function startHeroCarousel() {
+    stopHeroCarousel();
+    if (heroCarouselActivities.length > 1) {
+      heroCarouselTimer = setInterval(() => {
+        renderHeroSlide(heroCarouselIndex + 1);
+      }, 5000);
+    }
+  }
+
+  function stopHeroCarousel() {
+    if (heroCarouselTimer) {
+      clearInterval(heroCarouselTimer);
+      heroCarouselTimer = null;
+    }
+  }
+
+  function restartHeroCarousel() {
+    stopHeroCarousel();
+    startHeroCarousel();
+  }
+
+  function bindHeroCarouselEvents() {
+    const heroPrevBtn = document.getElementById('heroCarouselPrev');
+    const heroNextBtn = document.getElementById('heroCarouselNext');
+    const heroFrameEl = document.getElementById('heroVisualFrame');
+
+    // 桌面版左右箭頭切換
+    if (heroPrevBtn) {
+      heroPrevBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        renderHeroSlide(heroCarouselIndex - 1);
+        restartHeroCarousel(); // 重設 5 秒計時
+      });
+    }
+
+    if (heroNextBtn) {
+      heroNextBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        renderHeroSlide(heroCarouselIndex + 1);
+        restartHeroCarousel(); // 重設 5 秒計時
+      });
+    }
+
+    // 手機版觸控滑動切換 (Touch Swipe)
+    if (heroFrameEl) {
+      heroFrameEl.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches.length > 0) {
+          heroTouchStartX = e.touches[0].clientX;
+          heroTouchStartY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      heroFrameEl.addEventListener('touchend', (e) => {
+        if (e.changedTouches && e.changedTouches.length > 0) {
+          heroTouchEndX = e.changedTouches[0].clientX;
+          heroTouchEndY = e.changedTouches[0].clientY;
+          handleHeroSwipe();
+        }
+      }, { passive: true });
+    }
+
+    // 視窗離開或切換分頁時暫停輪播，返回時自動恢復
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopHeroCarousel();
+      } else {
+        if (heroCarouselActivities.length > 1) {
+          startHeroCarousel();
+        }
+      }
+    });
+  }
+
+  function handleHeroSwipe() {
+    if (heroCarouselActivities.length <= 1) return;
+    const deltaX = heroTouchEndX - heroTouchStartX;
+    const deltaY = heroTouchEndY - heroTouchStartY;
+    const minSwipeDistance = 35;
+
+    // 水平滑動幅度大於垂直滑動時才觸發切換
+    if (Math.abs(deltaX) > minSwipeDistance && Math.abs(deltaX) > Math.abs(deltaY)) {
+      heroDidSwipe = true;
+      setTimeout(() => { heroDidSwipe = false; }, 350);
+      if (deltaX < 0) {
+        // 向左滑 -> 下一個活動
+        renderHeroSlide(heroCarouselIndex + 1);
+      } else {
+        // 向右滑 -> 上一個活動
+        renderHeroSlide(heroCarouselIndex - 1);
+      }
+      restartHeroCarousel(); // 重設 5 秒計時
+    }
+  }
+
+  // Helper to build Card DOM
+  function createActivityCardElement(act, isExpired) {
+    const statusText = isExpired ? '⚫ 活動已結束' : '🟢 選擇進行中';
+    const statusClass = isExpired ? 'ended' : 'active';
+
+    // Count unique voters for this activity
+    const actSelections = selections.filter(s => s.activityId === act.id);
+    const uniqueVoterNames = [...new Set(actSelections.map(s => s.userName))];
+
+    // Count photos for this activity
+    const actPhotos = photos.filter(p => p.activityId === act.id);
+
+    const card = document.createElement('article');
+    card.className = 'activity-card';
+    card.setAttribute('data-id', act.id);
+
+    const optionsPreviewHtml = act.options && act.options.length > 0
+      ? act.options.slice(0, 3).map(opt => `<span class="activity-option-tag">${escapeHTML(opt)}</span>`).join('') +
+        (act.options.length > 3 ? `<span class="activity-option-tag">+${act.options.length - 3}</span>` : '')
+      : '';
+
+    // If expired, show memory photos count in meta list
+    const memoryPhotoMeta = isExpired
+      ? `
+        <div class="activity-meta-item">
+          <span class="meta-icon">📸</span>
+          <span>照片數量：<strong class="meta-highlight">📸 ${actPhotos.length} 張照片</strong></span>
+        </div>
+      `
+      : '';
+
+    card.innerHTML = `
+      <div class="activity-cover-wrap">
+        <img src="${act.cover}" alt="${escapeHTML(act.title)}" class="activity-cover-img" loading="lazy">
+        <div class="activity-status-badge ${statusClass}">
+          ${statusText}
+        </div>
+      </div>
+      <div class="activity-card-body">
+        <h3 class="activity-card-title">${escapeHTML(act.title)}</h3>
+        
+        <div class="activity-meta-list">
+          <div class="activity-meta-item">
+            <span class="meta-icon">👑</span>
+            <span>建立人：<strong class="meta-highlight">${escapeHTML(act.creator)}</strong></span>
+          </div>
+          <div class="activity-meta-item">
+            <span class="meta-icon">⏰</span>
+            <span>截止日期：<span class="meta-highlight">${escapeHTML(formatDateTime(act.deadline))}</span></span>
+          </div>
+          <div class="activity-meta-item">
+            <span class="meta-icon">👥</span>
+            <span>${isExpired ? '選擇結果：' : '已選擇好友：'}<strong class="meta-highlight">${uniqueVoterNames.length} 位好友</strong></span>
+          </div>
+          ${memoryPhotoMeta}
+        </div>
+
+        <div class="activity-options-preview">
+          ${optionsPreviewHtml}
+        </div>
+
+        <div class="activity-card-footer">
+          <span class="activity-host-badge">${isExpired ? `📸 ${actPhotos.length} 張照片` : `共 ${act.options.length} 項選項`}</span>
+          <button type="button" class="btn-view-activity ${isExpired ? 'btn-view-memories' : ''}" data-id="${act.id}">
+            <span>${isExpired ? '查看回憶' : '查看活動'}</span>
+            <span style="font-size: 0.95rem;">→</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    return card;
+  }
+
+  /* ==========================================================================
+     Activity Detail & Voting (Selection) Modal
+     ========================================================================== */
+  function openViewActivityModal(id) {
+    currentViewingActivityId = id;
+    const act = activities.find(item => item.id === id);
+    if (!act || !viewModal) return;
+
+    const coverElem = document.getElementById('viewActivityCover');
+    const titleElem = document.getElementById('viewModalTitle');
+    const creatorElem = document.getElementById('viewActivityCreator');
+    const deadlineElem = document.getElementById('viewActivityDeadline');
+    const statusBadge = document.getElementById('viewActivityStatusBadge');
+    const countBadge = document.getElementById('viewActivityOptionsCount');
+    const expiredBanner = document.getElementById('expiredActivityBanner');
+
+    const now = new Date();
+    const deadlineDate = new Date(act.deadline);
+    const isExpired = !isNaN(deadlineDate.getTime()) && deadlineDate <= now;
+
+    if (coverElem) coverElem.src = act.cover;
+    if (titleElem) titleElem.textContent = act.title;
+    if (creatorElem) creatorElem.textContent = `👑 發起人：${act.creator}`;
+    if (deadlineElem) deadlineElem.textContent = `📅 截止時間：${formatDateTime(act.deadline)}`;
+
+    // Update status badge: 🟢 選擇進行中 vs 🔒 選擇已結束
+    if (statusBadge) {
+      statusBadge.textContent = isExpired ? '🔒 選擇已結束' : '🟢 選擇進行中';
+      statusBadge.className = `view-status-pill ${isExpired ? 'ended' : ''}`;
+    }
+
+    if (countBadge) {
+      countBadge.textContent = `${act.options.length} 個選項`;
+    }
+
+    // Reset feedback message & inputs
+    if (voteFeedbackMsg) {
+      voteFeedbackMsg.style.display = 'none';
+      voteFeedbackMsg.className = 'vote-feedback';
+      voteFeedbackMsg.innerHTML = '';
+    }
+    if (voterNameInput) voterNameInput.value = '';
+
+    // Handle expired UI state:
+    // If expired: show expired banner, hide voting form, disable trigger button
+    if (isExpired) {
+      if (expiredBanner) expiredBanner.style.display = 'flex';
+      if (voteFormSection) voteFormSection.style.display = 'none';
+      if (btnToggleVoteForm) {
+        btnToggleVoteForm.disabled = true;
+        btnToggleVoteForm.classList.add('disabled');
+        btnToggleVoteForm.innerHTML = '<span>🔒 本活動選擇已截止</span>';
+      }
+    } else {
+      if (expiredBanner) expiredBanner.style.display = 'none';
+      if (voteFormSection) voteFormSection.style.display = 'flex';
+      if (btnToggleVoteForm) {
+        btnToggleVoteForm.disabled = false;
+        btnToggleVoteForm.classList.remove('disabled');
+        btnToggleVoteForm.innerHTML = '<span class="btn-icon">＋</span><span>我要參與選擇</span>';
+      }
+    }
+
+    // Render detail options and real-time voter names
+    renderDetailOptionsAndVoters(act);
+
+    // Render activity chatroom messages (💬 活動聊天室)
+    renderActivityChat(act.id);
+    if (chatTextInput) chatTextInput.value = '';
+    // 開啟活動時即時向 Supabase 拉取最新聊天訊息
+    if (supabaseClient && isSupabaseReady) {
+      fetchMessagesFromCloud();
+    }
+
+    // Render activity memory photos (📸 活動回憶)
+    renderActivityPhotos(act.id, isExpired);
+
+    viewModal.classList.add('open');
+    viewModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function renderDetailOptionsAndVoters(act) {
+    if (!act) return;
+
+    // Filter selections for this activity
+    const actSelections = selections.filter(s => s.activityId === act.id);
+    const uniqueVoterNames = [...new Set(actSelections.map(s => s.userName))];
+
+    // Update Summary Header
+    const votersSummaryText = document.getElementById('votersSummaryText');
+    if (votersSummaryText) {
+      votersSummaryText.textContent = `目前共 ${uniqueVoterNames.length} 位好友已參與選擇`;
+    }
+
+    // Render multi-select checkboxes inside vote form
+    if (voterCheckboxList) {
+      voterCheckboxList.innerHTML = '';
+      act.options.forEach(opt => {
+        const card = document.createElement('div');
+        card.className = 'voter-checkbox-card';
+        card.setAttribute('data-option', opt);
+        card.innerHTML = `
+          <div class="custom-checkbox-indicator"></div>
+          <span class="voter-checkbox-text">${escapeHTML(opt)}</span>
+        `;
+
+        card.addEventListener('click', () => {
+          card.classList.toggle('selected');
+          const checkInd = card.querySelector('.custom-checkbox-indicator');
+          if (card.classList.contains('selected')) {
+            checkInd.textContent = '✓';
+          } else {
+            checkInd.textContent = '';
+          }
+        });
+
+        voterCheckboxList.appendChild(card);
+      });
+    }
+
+    const now = new Date();
+    const dDate = new Date(act.deadline);
+    const isExpired = !isNaN(dDate.getTime()) && dDate <= now;
+
+    // Render Real-time Options & Names list (誰選了什麼)
+    const optionsContainer = document.getElementById('viewActivityOptionsContainer');
+    if (optionsContainer) {
+      optionsContainer.innerHTML = '';
+
+      act.options.forEach((opt, i) => {
+        // Find all voters who chose this option
+        const optVoters = actSelections
+          .filter(s => s.optionId === opt)
+          .map(s => s.userName);
+
+        const card = document.createElement('div');
+        card.className = 'option-voter-card';
+
+        // Voter name badges HTML
+        let voterChipsHtml = '';
+        if (optVoters.length > 0) {
+          voterChipsHtml = optVoters.map(name => `
+            <span class="voter-name-chip">
+              <span class="voter-chip-avatar">${escapeHTML(name.charAt(0))}</span>
+              <span>${escapeHTML(name)}</span>
+            </span>
+          `).join('');
+        } else {
+          voterChipsHtml = `<span class="no-voters-hint">尚無好友選擇，點擊「我要選擇」成為第一位！</span>`;
+        }
+
+        card.innerHTML = `
+          <div class="option-voter-header">
+            <div class="option-title-wrap">
+              <span class="option-index-badge">0${i + 1}</span>
+              <h4 class="option-main-title">${escapeHTML(opt)}</h4>
+            </div>
+            <div class="option-header-actions">
+              <span class="voter-count-badge">目前 ${optVoters.length} 人選擇</span>
+              <button type="button" class="btn-choose-this ${isExpired ? 'disabled' : ''}" data-option="${escapeHTML(opt)}" ${isExpired ? 'disabled title="本活動選擇已截止"' : ''}>
+                ${isExpired ? '已截止' : '我要選擇'}
+              </button>
+            </div>
+          </div>
+
+          <div class="voter-names-block">
+            <span class="voter-names-label">選擇好友：</span>
+            <div class="voter-chips-wrap">
+              ${voterChipsHtml}
+            </div>
+          </div>
+        `;
+
+        // Click on "我要選擇" button on individual card
+        const chooseBtn = card.querySelector('.btn-choose-this');
+        if (chooseBtn && !isExpired) {
+          chooseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const targetOpt = chooseBtn.getAttribute('data-option');
+            preselectOptionInForm(targetOpt);
+          });
+        }
+
+        optionsContainer.appendChild(card);
+      });
+    }
+  }
+
+  // Pre-select an option and scroll down to the vote form
+  function preselectOptionInForm(optText) {
+    if (!voteFormSection) return;
+
+    // Check if checkbox exists and toggle it on
+    if (voterCheckboxList) {
+      const targetCard = voterCheckboxList.querySelector(`[data-option="${CSS.escape(optText)}"]`);
+      if (targetCard && !targetCard.classList.contains('selected')) {
+        targetCard.classList.add('selected');
+        const checkInd = targetCard.querySelector('.custom-checkbox-indicator');
+        if (checkInd) checkInd.textContent = '✓';
+      }
+    }
+
+    // Scroll form into view and focus name input
+    voteFormSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (voterNameInput) {
+      setTimeout(() => voterNameInput.focus(), 250);
+    }
+  }
+
+  // Toggle vote form focus
+  if (btnToggleVoteForm) {
+    btnToggleVoteForm.addEventListener('click', () => {
+      if (voteFormSection) {
+        voteFormSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (voterNameInput) setTimeout(() => voterNameInput.focus(), 250);
+      }
+    });
+  }
+
+  /* ------------------- Handle Vote Submission ------------------- */
+  if (btnSubmitVote) {
+    btnSubmitVote.addEventListener('click', async () => {
+      if (!currentViewingActivityId) return;
+
+      const act = activities.find(a => a.id === currentViewingActivityId);
+      if (!act) return;
+
+      // Validate deadline
+      const now = new Date();
+      const dDate = new Date(act.deadline);
+      if (!isNaN(dDate.getTime()) && dDate <= now) {
+        showVoteFeedback('warning', '🔒 本活動選擇已截止，無法再送出選擇。');
+        showToast('本活動選擇已截止');
+        return;
+      }
+
+      const voterName = voterNameInput ? voterNameInput.value.trim() : '';
+
+      // Validate Name
+      if (!voterName) {
+        showVoteFeedback('error', '⚠️ 請輸入你的姓名！');
+        if (voterNameInput) voterNameInput.focus();
+        return;
+      }
+
+      // Check which options are checked
+      const selectedCards = voterCheckboxList ? voterCheckboxList.querySelectorAll('.voter-checkbox-card.selected') : [];
+      if (selectedCards.length === 0) {
+        showVoteFeedback('error', '⚠️ 請至少勾選 1 個你想參加的項目！');
+        return;
+      }
+
+      const selectedOptions = Array.from(selectedCards).map(card => card.getAttribute('data-option'));
+
+      // Check if user has already voted for this activity (Prevent Duplicates)
+      const hasVoted = selections.some(s => 
+        s.activityId === currentViewingActivityId && 
+        s.userName.trim().toLowerCase() === voterName.toLowerCase()
+      );
+
+      if (hasVoted) {
+        showVoteFeedback('warning', `⚠️ 你已經完成選擇。`);
+        showToast(`你已經完成選擇。`);
+        return;
+      }
+
+      // Add new selection records
+      const nowIso = new Date().toISOString();
+      const newlyAddedVotes = [];
+      selectedOptions.forEach(opt => {
+        const voteItem = {
+          id: 'sel_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          activityId: currentViewingActivityId,
+          optionId: opt,
+          userName: voterName,
+          createdAt: nowIso
+        };
+        newlyAddedVotes.push(voteItem);
+      });
+
+      // 防止重複點擊
+      const originalSubmitText = btnSubmitVote.textContent;
+      btnSubmitVote.disabled = true;
+      btnSubmitVote.textContent = '雲端同步送出中...';
+
+      try {
+        // 若雲端已連線，嘗試寫入 Supabase selections
+        if (supabaseClient && isSupabaseReady) {
+          const cloudRes = await syncNewSelectionsToCloud(newlyAddedVotes);
+          if (!cloudRes || !cloudRes.success) {
+            const errMsg = cloudRes?.error?.message || '雲端資料庫寫入失敗';
+            console.error('投票寫入 Supabase 失敗:', cloudRes?.error || errMsg);
+            showVoteFeedback('error', `⚠️ 投票送出失敗：${errMsg}。請稍後重試。`);
+            showToast('⚠️ 投票同步失敗，請重試');
+            return;
+          }
+        }
+
+        // 成功後加入本地記憶體與快取
+        newlyAddedVotes.forEach(v => selections.push(v));
+        saveSelections(selections);
+
+        // Show success message: ✅ 選擇完成！ 小明已完成選擇。
+        showVoteFeedback('success', `✅ 選擇完成！<br><strong>${escapeHTML(voterName)}</strong> 已完成選擇。`);
+        showToast(`✅ 選擇完成！${voterName} 已完成選擇。`);
+
+        // Refresh real-time options and voter names
+        renderDetailOptionsAndVoters(act);
+
+        // If user provided a name and currentChatUser is default or empty, adopt it
+        if (voterName && (!localStorage.getItem(STORAGE_KEY_CHAT_USER) || currentChatUser === '冠宏')) {
+          currentChatUser = voterName;
+          saveChatUser(currentChatUser);
+          if (currentChatUserDisplay) {
+            currentChatUserDisplay.textContent = currentChatUser;
+          }
+          renderActivityChat(act.id);
+        }
+
+        // Refresh home page activity cards as well
+        renderGatheringCards();
+
+        // Clear selection inputs after brief delay
+        setTimeout(() => {
+          if (voterNameInput) voterNameInput.value = '';
+          if (voterCheckboxList) {
+            const cards = voterCheckboxList.querySelectorAll('.voter-checkbox-card');
+            cards.forEach(c => {
+              c.classList.remove('selected');
+              const ind = c.querySelector('.custom-checkbox-indicator');
+              if (ind) ind.textContent = '';
+            });
+          }
+        }, 2500);
+
+      } catch (voteErr) {
+        console.error('送出選擇時發生異常:', voteErr);
+        showVoteFeedback('error', '⚠️ 送出時發生異常，請稍後重試。');
+      } finally {
+        btnSubmitVote.disabled = false;
+        btnSubmitVote.textContent = originalSubmitText;
+      }
+    });
+  }
+
+  function showVoteFeedback(type, message) {
+    if (!voteFeedbackMsg) return;
+    voteFeedbackMsg.className = `vote-feedback ${type}`;
+    voteFeedbackMsg.innerHTML = message;
+    voteFeedbackMsg.style.display = 'block';
+  }
+
+  /* ------------------- Activity Chatroom Logic (💬 活動聊天室) ------------------- */
+  function renderActivityChat(activityId) {
+    if (!chatStreamContainer) return;
+
+    if (currentChatUserDisplay) {
+      currentChatUserDisplay.textContent = currentChatUser || '未設定';
+    }
+
+    const actMsgs = messages
+      .filter(m => m.activityId === activityId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    if (chatMessageCountBadge) {
+      chatMessageCountBadge.textContent = `${actMsgs.length} 則訊息`;
+    }
+
+    chatStreamContainer.innerHTML = '';
+
+    if (actMsgs.length === 0) {
+      chatStreamContainer.innerHTML = `
+        <div class="chat-empty-state">
+          <span class="chat-empty-icon">💬</span>
+          <p>目前活動中尚無聊天發言<br><span style="font-size: 0.8rem; color: var(--gold-light);">成為第一個在活動裡發言的朋友吧！</span></p>
+        </div>
+      `;
+      return;
+    }
+
+    actMsgs.forEach(msg => {
+      const isSelf = Boolean(currentChatUser && msg.userName.trim().toLowerCase() === currentChatUser.trim().toLowerCase());
+      const row = document.createElement('div');
+      row.className = `chat-msg-row ${isSelf ? 'self' : 'other'}`;
+
+      const avatarChar = escapeHTML((msg.userName || '?').trim().charAt(0) || '?');
+      const timeStr = formatChatTime(msg.createdAt);
+      const fullTimeStr = formatDateTime(msg.createdAt);
+
+      if (isSelf) {
+        // 自己的訊息：靠右
+        row.innerHTML = `
+          <div class="chat-msg-meta">
+            <span class="chat-msg-sender">${escapeHTML(msg.userName)}</span>
+            <div class="chat-msg-avatar" title="${escapeHTML(msg.userName)}">${avatarChar}</div>
+          </div>
+          <div class="chat-msg-bubble">${escapeHTML(msg.message)}</div>
+          <div class="chat-msg-footer">
+            <span class="chat-msg-time" title="${escapeHTML(fullTimeStr)}">${timeStr}</span>
+          </div>
+        `;
+      } else {
+        // 其他人的訊息：靠左
+        row.innerHTML = `
+          <div class="chat-msg-meta">
+            <div class="chat-msg-avatar" title="${escapeHTML(msg.userName)}">${avatarChar}</div>
+            <span class="chat-msg-sender">${escapeHTML(msg.userName)}</span>
+          </div>
+          <div class="chat-msg-bubble">${escapeHTML(msg.message)}</div>
+          <div class="chat-msg-footer">
+            <span class="chat-msg-time" title="${escapeHTML(fullTimeStr)}">${timeStr}</span>
+          </div>
+        `;
+      }
+
+      chatStreamContainer.appendChild(row);
+    });
+
+    // Auto scroll chat to bottom
+    chatStreamContainer.scrollTop = chatStreamContainer.scrollHeight;
+  }
+
+  async function sendCurrentChatMessage() {
+    if (!currentViewingActivityId) return;
+
+    // Check if user has set a name
+    if (!currentChatUser || !currentChatUser.trim()) {
+      openChatNameModal();
+      return;
+    }
+
+    const text = chatTextInput ? chatTextInput.value.trim() : '';
+
+    // Prevent empty / whitespace messages
+    if (!text) {
+      showToast('⚠️ 請輸入聊天訊息，不能發送空白內容');
+      if (chatTextInput) chatTextInput.focus();
+      return;
+    }
+
+    const newMsg = {
+      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      activityId: currentViewingActivityId,
+      userName: currentChatUser.trim(),
+      message: text,
+      createdAt: new Date().toISOString()
+    };
+
+    const btnSend = document.querySelector('.btn-send-message');
+    if (btnSend) btnSend.disabled = true;
+
+    try {
+      if (supabaseClient && isSupabaseReady) {
+        const cloudResult = await syncNewMessageToCloud(newMsg);
+
+        if (cloudResult && cloudResult.success) {
+          // 只有在 INSERT 成功時才更新本地狀態
+          if (!messages.some(m => m.id === newMsg.id)) {
+            messages.push(newMsg);
+            saveMessages(messages);
+          }
+
+          if (chatTextInput) {
+            chatTextInput.value = '';
+          }
+
+          renderActivityChat(currentViewingActivityId);
+          showToast('💬 訊息已送出！');
+
+          // Scroll to bottom smoothly
+          setTimeout(() => {
+            if (chatStreamContainer) {
+              chatStreamContainer.scrollTop = chatStreamContainer.scrollHeight;
+            }
+          }, 40);
+        } else {
+          const errMsg = cloudResult?.error?.message || '雲端資料庫寫入失敗';
+          console.error('發送聊天訊息至 Supabase 失敗:', cloudResult?.error || errMsg);
+          showToast(`⚠️ 發送失敗：${errMsg}。內容已保留，請重試。`);
+        }
+      } else {
+        showToast('⚠️ 目前未連線至雲端資料庫，無法送出跨裝置訊息。');
+      }
+    } catch (err) {
+      console.error('發送聊天訊息異常:', err);
+      showToast('⚠️ 發送時發生異常，請稍後再試。');
+    } finally {
+      if (btnSend) btnSend.disabled = false;
+    }
+  }
+
+  // Chat Identity Modal Handlers
+  function openChatNameModal() {
+    if (!chatNameModal) return;
+    if (chatUserNameInput) {
+      chatUserNameInput.value = currentChatUser || '';
+    }
+    chatNameModal.classList.add('open');
+    chatNameModal.setAttribute('aria-hidden', 'false');
+    setTimeout(() => {
+      if (chatUserNameInput) chatUserNameInput.focus();
+    }, 150);
+  }
+
+  function closeChatNameModal() {
+    if (!chatNameModal) return;
+    chatNameModal.classList.remove('open');
+    chatNameModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function handleConfirmChatName() {
+    if (!chatUserNameInput) return;
+    const newName = chatUserNameInput.value.trim();
+    if (!newName) {
+      showToast('⚠️ 請輸入你的姓名！');
+      chatUserNameInput.focus();
+      return;
+    }
+
+    currentChatUser = newName;
+    saveChatUser(currentChatUser);
+    closeChatNameModal();
+    showToast(`✨ 聊天發言身份已設定為「${currentChatUser}」`);
+
+    if (currentChatUserDisplay) {
+      currentChatUserDisplay.textContent = currentChatUser;
+    }
+
+    if (currentViewingActivityId) {
+      renderActivityChat(currentViewingActivityId);
+    }
+
+    if (chatTextInput) {
+      chatTextInput.focus();
+    }
+  }
+
+  // Bind Chat Event Listeners
+  if (btnSwitchChatIdentity) {
+    btnSwitchChatIdentity.addEventListener('click', openChatNameModal);
+  }
+
+  if (btnCloseChatNameModal) {
+    btnCloseChatNameModal.addEventListener('click', closeChatNameModal);
+  }
+
+  if (btnCancelChatName) {
+    btnCancelChatName.addEventListener('click', closeChatNameModal);
+  }
+
+  if (chatNameModal) {
+    chatNameModal.addEventListener('click', (e) => {
+      if (e.target === chatNameModal) closeChatNameModal();
+    });
+  }
+
+  if (chatNameForm) {
+    chatNameForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      handleConfirmChatName();
+    });
+  }
+
+  if (btnConfirmChatName) {
+    btnConfirmChatName.addEventListener('click', (e) => {
+      e.preventDefault();
+      handleConfirmChatName();
+    });
+  }
+
+  if (btnSendMessage) {
+    btnSendMessage.addEventListener('click', (e) => {
+      e.preventDefault();
+      sendCurrentChatMessage();
+    });
+  }
+
+  if (chatInputForm) {
+    chatInputForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      sendCurrentChatMessage();
+    });
+  }
+
+  if (chatTextInput) {
+    chatTextInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendCurrentChatMessage();
+      }
+    });
+  }
+
+  /* ------------------- Activity Memories & Photos Logic (📸 活動回憶) ------------------- */
+  const photoFileInput = document.getElementById('photoFileInput');
+  const photosCountBadge = document.getElementById('photosCountBadge');
+  const photosGalleryGrid = document.getElementById('photosGalleryGrid');
+  const photosEmptyState = document.getElementById('photosEmptyState');
+  const photosHeaderActions = document.getElementById('photosHeaderActions');
+  const photosSectionDesc = document.getElementById('photosSectionDesc');
+
+  // Lightbox Elements
+  const photoLightboxModal = document.getElementById('photoLightboxModal');
+  const lightboxImg = document.getElementById('lightboxImg');
+  const lightboxIndex = document.getElementById('lightboxIndex');
+  const lightboxCaption = document.getElementById('lightboxCaption');
+  const btnLightboxPrev = document.getElementById('btnLightboxPrev');
+  const btnLightboxNext = document.getElementById('btnLightboxNext');
+  const btnCloseLightbox = document.getElementById('btnCloseLightbox');
+  const lightboxBackdrop = document.getElementById('lightboxBackdrop');
+  const btnDownloadCurrentPhoto = document.getElementById('btnDownloadCurrentPhoto');
+
+  let currentLightboxPhotos = [];
+  let currentLightboxIndex = 0;
+
+  function renderActivityPhotos(activityId, isExpired) {
+    if (!photosGalleryGrid) return;
+
+    const actPhotos = photos.filter(p => p.activityId === activityId);
+
+    if (photosCountBadge) {
+      photosCountBadge.textContent = `${actPhotos.length} 張照片`;
+    }
+
+    if (photosSectionDesc) {
+      photosSectionDesc.textContent = isExpired
+        ? '活動結束後的美好回憶封存，可隨時上傳與下載朋友間的精彩照片'
+        : '聚會精彩瞬間，活動進行中亦可提前上傳花絮或下載珍藏照片';
+    }
+
+    photosGalleryGrid.innerHTML = '';
+
+    if (actPhotos.length === 0) {
+      if (photosEmptyState) photosEmptyState.style.display = 'block';
+      return;
+    }
+
+    if (photosEmptyState) photosEmptyState.style.display = 'none';
+
+    actPhotos.forEach((photo, idx) => {
+      const card = document.createElement('div');
+      card.className = 'photo-gallery-card';
+      card.setAttribute('data-index', idx);
+      card.setAttribute('title', '點擊開啟大圖檢視與下載');
+
+      card.innerHTML = `
+        <img src="${photo.url}" alt="${escapeHTML(photo.caption || '活動照片')}" class="photo-card-img" loading="lazy">
+        <div class="photo-card-overlay">
+          <span class="photo-card-caption">${escapeHTML(photo.caption || '精彩瞬間')}</span>
+          <button type="button" class="photo-card-quick-download" title="下載此照片" data-index="${idx}">📥</button>
+        </div>
+      `;
+
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.photo-card-quick-download')) {
+          e.stopPropagation();
+          downloadPhoto(photo.url, `${photo.caption || 'activity_memory'}.jpg`);
+          return;
+        }
+        openLightbox(actPhotos, idx);
+      });
+
+      photosGalleryGrid.appendChild(card);
+    });
+  }
+
+  // Handle Multi-file Upload to Supabase Storage & activity_photos
+  if (photoFileInput) {
+    photoFileInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      if (!files || files.length === 0 || !currentViewingActivityId) return;
+
+      const validFiles = files.filter(f => ['image/jpeg', 'image/png', 'image/webp'].includes(f.type));
+      if (validFiles.length === 0) {
+        showToast('⚠️ 僅支援 JPG、PNG、WEBP 格式照片');
+        photoFileInput.value = '';
+        return;
+      }
+
+      if (!supabaseClient || !isSupabaseReady) {
+        showToast('⚠️ 尚未連線至 Supabase 雲端資料庫，無法上傳照片');
+        photoFileInput.value = '';
+        return;
+      }
+
+      showToast(`⏳ 正在上傳與最佳化 ${validFiles.length} 張照片至雲端...`);
+
+      let successCount = 0;
+      let failedCount = 0;
+      let lastErrorMsg = '';
+
+      for (const file of validFiles) {
+        try {
+          // 1. 圖片客戶端品質最佳化壓縮 (限制長邊 1280px，優質 JPEG Blob)
+          const blob = await compressImageToBlob(file, 1280, 0.82);
+          const photoId = 'photo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          const storagePath = `${currentViewingActivityId}/${photoId}.jpg`;
+
+          // 2. 上傳實際圖片檔案至 Supabase Storage (activity-photos bucket)
+          const { error: uploadError } = await supabaseClient.storage
+            .from('activity-photos')
+            .upload(storagePath, blob, {
+              contentType: 'image/jpeg',
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            throw new Error(`Storage 上傳失敗: ${uploadError.message}`);
+          }
+
+          // 3. 取得公開圖片 URL
+          const { data: pubData } = supabaseClient.storage
+            .from('activity-photos')
+            .getPublicUrl(storagePath);
+
+          const publicUrl = pubData ? pubData.publicUrl : '';
+          if (!publicUrl) {
+            throw new Error('無法取得圖片公開網址');
+          }
+
+          // 4. 寫入 activity_photos metadata 資料表
+          const dbRow = {
+            id: photoId,
+            activity_id: currentViewingActivityId,
+            caption: file.name.replace(/\.[^/.]+$/, ''),
+            storage_path: storagePath,
+            public_url: publicUrl,
+            uploaded_at: new Date().toISOString()
+          };
+
+          const { error: insertError } = await supabaseClient
+            .from('activity_photos')
+            .insert([dbRow]);
+
+          if (insertError) {
+            throw new Error(`資料表寫入失敗: ${insertError.message}`);
+          }
+
+          // 只有 Storage 與 activity_photos 皆成功時才計入成功
+          const newPhoto = {
+            id: photoId,
+            activityId: currentViewingActivityId,
+            caption: dbRow.caption,
+            storagePath: storagePath,
+            url: publicUrl,
+            uploadedAt: dbRow.uploaded_at
+          };
+          photos.push(newPhoto);
+          successCount++;
+        } catch (err) {
+          console.error('照片上傳失敗:', err);
+          failedCount++;
+          lastErrorMsg = err.message || '連線異常';
+        }
+      }
+
+      photoFileInput.value = '';
+
+      // 儲存照片至本機快取（此時 url 為雲端 publicUrl，不含 Base64）
+      savePhotos(photos);
+
+      const act = activities.find(a => a.id === currentViewingActivityId);
+      const now = new Date();
+      const isExpired = act && !isNaN(new Date(act.deadline).getTime()) && new Date(act.deadline) <= now;
+
+      renderActivityPhotos(currentViewingActivityId, isExpired);
+      renderGatheringCards();
+
+      if (successCount > 0 && failedCount === 0) {
+        showToast(`📸 成功上傳 ${successCount} 張活動回憶照片！`);
+      } else if (successCount > 0 && failedCount > 0) {
+        showToast(`📸 成功上傳 ${successCount} 張照片（${failedCount} 張失敗：${lastErrorMsg}）`);
+      } else {
+        showToast(`⚠️ 照片上傳失敗：${lastErrorMsg}`);
+      }
+    });
+  }
+
+  // Lightbox Functions
+  function openLightbox(photosList, index = 0) {
+    if (!photoLightboxModal || !photosList || photosList.length === 0) return;
+
+    currentLightboxPhotos = photosList;
+    currentLightboxIndex = index;
+    updateLightboxUI();
+
+    photoLightboxModal.classList.add('open');
+    photoLightboxModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox() {
+    if (!photoLightboxModal) return;
+    photoLightboxModal.classList.remove('open');
+    photoLightboxModal.setAttribute('aria-hidden', 'true');
+
+    if (!viewModal || !viewModal.classList.contains('open')) {
+      document.body.style.overflow = '';
+    }
+  }
+
+  function lightboxPrev() {
+    if (currentLightboxPhotos.length === 0) return;
+    currentLightboxIndex = (currentLightboxIndex - 1 + currentLightboxPhotos.length) % currentLightboxPhotos.length;
+    updateLightboxUI();
+  }
+
+  function lightboxNext() {
+    if (currentLightboxPhotos.length === 0) return;
+    currentLightboxIndex = (currentLightboxIndex + 1) % currentLightboxPhotos.length;
+    updateLightboxUI();
+  }
+
+  function updateLightboxUI() {
+    if (!currentLightboxPhotos[currentLightboxIndex]) return;
+    const p = currentLightboxPhotos[currentLightboxIndex];
+
+    if (lightboxImg) lightboxImg.src = p.url;
+    if (lightboxIndex) lightboxIndex.textContent = `${currentLightboxIndex + 1} / ${currentLightboxPhotos.length}`;
+    if (lightboxCaption) lightboxCaption.textContent = p.caption || '活動回憶照片';
+  }
+
+  // Lightbox Listeners
+  if (btnLightboxPrev) btnLightboxPrev.addEventListener('click', lightboxPrev);
+  if (btnLightboxNext) btnLightboxNext.addEventListener('click', lightboxNext);
+  if (btnCloseLightbox) btnCloseLightbox.addEventListener('click', closeLightbox);
+  if (lightboxBackdrop) lightboxBackdrop.addEventListener('click', closeLightbox);
+
+  if (btnDownloadCurrentPhoto) {
+    btnDownloadCurrentPhoto.addEventListener('click', () => {
+      if (currentLightboxPhotos[currentLightboxIndex]) {
+        const p = currentLightboxPhotos[currentLightboxIndex];
+        downloadPhoto(p.url, `${p.caption || 'activity_photo'}.jpg`);
+      }
+    });
+  }
+
+  // Mobile Touch Swipe on Lightbox
+  if (photoLightboxModal) {
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    photoLightboxModal.addEventListener('touchstart', (e) => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    photoLightboxModal.addEventListener('touchend', (e) => {
+      const touchEndX = e.changedTouches[0].clientX;
+      const touchEndY = e.changedTouches[0].clientY;
+      const diffX = touchEndX - touchStartX;
+      const diffY = touchEndY - touchStartY;
+
+      if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY)) {
+        if (diffX < 0) {
+          lightboxNext();
+        } else {
+          lightboxPrev();
+        }
+      }
+    }, { passive: true });
+  }
+
+  function closeViewModal() {
+    if (!viewModal) return;
+    closeDeleteModal();
+    viewModal.classList.remove('open');
+    viewModal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    currentViewingActivityId = null;
+  }
+
+  if (viewModalCloseBtn) viewModalCloseBtn.addEventListener('click', closeViewModal);
+  if (btnCloseViewModal) btnCloseViewModal.addEventListener('click', closeViewModal);
+
+  if (viewModal) {
+    viewModal.addEventListener('click', (e) => {
+      if (e.target === viewModal) closeViewModal();
+    });
+  }
+
+  /* ------------------- Activity Deletion Logic (🗑️ 活動刪除密碼驗證) ------------------- */
+  function openDeleteModal() {
+    if (!deleteActivityModal || !currentViewingActivityId) return;
+    const act = activities.find(a => a.id === currentViewingActivityId);
+    if (!act) return;
+
+    if (inputDeletePassword) inputDeletePassword.value = '';
+    if (inputLegacyNewPassword) inputLegacyNewPassword.value = '';
+    if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.value = '';
+
+    if (deletePasswordGroup) deletePasswordGroup.style.display = 'block';
+    if (legacySetPasswordGroup) legacySetPasswordGroup.style.display = 'none';
+
+    deleteActivityModal.classList.add('open');
+    deleteActivityModal.setAttribute('aria-hidden', 'false');
+    if (inputDeletePassword) setTimeout(() => inputDeletePassword.focus(), 150);
+  }
+
+  function closeDeleteModal() {
+    if (!deleteActivityModal) return;
+    deleteActivityModal.classList.remove('open');
+    deleteActivityModal.setAttribute('aria-hidden', 'true');
+    if (inputDeletePassword) inputDeletePassword.value = '';
+    if (inputLegacyNewPassword) inputLegacyNewPassword.value = '';
+    if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.value = '';
+  }
+
+  if (btnOpenDeleteModal) {
+    btnOpenDeleteModal.addEventListener('click', openDeleteModal);
+  }
+
+  if (btnCloseDeleteModal) {
+    btnCloseDeleteModal.addEventListener('click', closeDeleteModal);
+  }
+
+  if (btnCancelDelete) {
+    btnCancelDelete.addEventListener('click', closeDeleteModal);
+  }
+
+  if (deleteActivityModal) {
+    deleteActivityModal.addEventListener('click', (e) => {
+      if (e.target === deleteActivityModal) closeDeleteModal();
+    });
+  }
+
+  // Handle Delete Confirmation Submit
+  async function handleConfirmDeleteActivity(e) {
+    if (e && e.preventDefault) e.preventDefault();
+
+    if (!currentViewingActivityId) {
+      showToast('⚠️ 找不到目前活動，請重新開啟活動。');
+      closeDeleteModal();
+      return;
+    }
+
+    const act = activities.find(a => a.id === currentViewingActivityId);
+    if (!act) {
+      showToast('⚠️ 找不到目前活動，請重新開啟活動。');
+      closeDeleteModal();
+      return;
+    }
+
+    // 檢查是否處於為舊活動補設密碼狀態
+    const isLegacyMode = legacySetPasswordGroup && legacySetPasswordGroup.style.display !== 'none';
+
+    if (isLegacyMode) {
+      const newPwd = inputLegacyNewPassword ? inputLegacyNewPassword.value.trim() : '';
+      const confirmNewPwd = inputLegacyConfirmPassword ? inputLegacyConfirmPassword.value.trim() : '';
+
+      if (!newPwd || newPwd.length < 4) {
+        showToast('⚠️ 刪除密碼至少需 4 位字元');
+        if (inputLegacyNewPassword) inputLegacyNewPassword.focus();
+        return;
+      }
+
+      if (newPwd !== confirmNewPwd) {
+        showToast('⚠️ 兩次輸入的密碼不一致，請重新確認');
+        if (inputLegacyConfirmPassword) inputLegacyConfirmPassword.focus();
+        return;
+      }
+
+      // 按鈕進入 loading 狀態，防重複提交
+      if (btnConfirmDeleteActivity) {
+        btnConfirmDeleteActivity.disabled = true;
+        btnConfirmDeleteActivity.textContent = '刪除中...';
+      }
+
+      try {
+        const setRes = await setActivityDeletePasswordOnCloud(act.id, newPwd);
+        if (!setRes.success) {
+          console.error('setActivityDeletePasswordOnCloud 失敗:', setRes);
+          showToast(`⚠️ 設定密碼失敗：${setRes.message || '請稍後再試。'}`);
+          return;
+        }
+
+        const delRes = await deleteActivityFromCloud(act.id, newPwd);
+        if (delRes && delRes.success) {
+          executeLocalActivityDeletion(act.id, act.title);
+        } else {
+          console.error('deleteActivityFromCloud 失敗:', delRes);
+          showToast(`⚠️ 刪除失敗：${delRes?.message || '請稍後再試。'}`);
+        }
+      } catch (err) {
+        console.error('舊活動設定密碼並刪除異常:', err);
+        showToast('⚠️ 刪除失敗，請稍後再試。');
+      } finally {
+        if (btnConfirmDeleteActivity) {
+          btnConfirmDeleteActivity.disabled = false;
+          btnConfirmDeleteActivity.textContent = '確認刪除';
+        }
+      }
+      return;
+    }
+
+    // 標準密碼驗證刪除
+    const pwd = inputDeletePassword ? inputDeletePassword.value.trim() : '';
+    if (!pwd) {
+      showToast('⚠️ 請輸入活動建立時設定的刪除密碼');
+      if (inputDeletePassword) inputDeletePassword.focus();
+      return;
+    }
+
+    // 按鈕進入 loading 狀態，防重複提交
+    if (btnConfirmDeleteActivity) {
+      btnConfirmDeleteActivity.disabled = true;
+      btnConfirmDeleteActivity.textContent = '刪除中...';
+    }
+
+    try {
+      const res = await deleteActivityFromCloud(act.id, pwd);
+      if (res && res.success) {
+        executeLocalActivityDeletion(act.id, act.title);
+      } else if (res && (res.error === 'INVALID_PASSWORD' || res.message?.includes('密碼錯誤') || res.message?.includes('password'))) {
+        showToast('❌ 刪除密碼錯誤，請重新輸入。');
+        if (inputDeletePassword) {
+          inputDeletePassword.value = '';
+          inputDeletePassword.focus();
+        }
+      } else if (res && res.error === 'NO_PASSWORD_SET') {
+        showToast('此活動尚未設定刪除密碼，請先設定刪除密碼。');
+        if (deletePasswordGroup) deletePasswordGroup.style.display = 'none';
+        if (legacySetPasswordGroup) legacySetPasswordGroup.style.display = 'block';
+        if (inputLegacyNewPassword) setTimeout(() => inputLegacyNewPassword.focus(), 100);
+      } else {
+        const errMsg = res?.message || '刪除失敗，請稍後再試。';
+        console.error('刪除活動失敗:', res);
+        showToast(`⚠️ ${errMsg}`);
+      }
+    } catch (err) {
+      console.error('刪除活動異常:', err);
+      showToast('⚠️ 刪除失敗，請稍後再試。');
+    } finally {
+      if (btnConfirmDeleteActivity) {
+        btnConfirmDeleteActivity.disabled = false;
+        btnConfirmDeleteActivity.textContent = '確認刪除';
+      }
+    }
+  }
+
+  // 綁定確認刪除按鈕點擊與表單送出（雙重保障）
+  if (btnConfirmDeleteActivity) {
+    btnConfirmDeleteActivity.addEventListener('click', handleConfirmDeleteActivity);
+  }
+  if (deleteActivityForm) {
+    deleteActivityForm.addEventListener('submit', handleConfirmDeleteActivity);
+  }
+  if (inputDeletePassword) {
+    inputDeletePassword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleConfirmDeleteActivity(e);
+    });
+  }
+  if (inputLegacyConfirmPassword) {
+    inputLegacyConfirmPassword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleConfirmDeleteActivity(e);
+    });
+  }
+
+  // 本地狀態清理與介面更新
+  function executeLocalActivityDeletion(activityId, title) {
+    markActivityAsDeleted(activityId);
+
+    // 清理前端記憶體與快取
+    activities = activities.filter(a => a.id !== activityId);
+    selections = selections.filter(s => s.activityId !== activityId);
+    messages = messages.filter(m => m.activityId !== activityId);
+    photos = photos.filter(p => p.activityId !== activityId);
+
+    saveActivities(activities);
+    saveSelections(selections);
+    saveMessages(messages);
+    savePhotos(photos);
+
+    closeDeleteModal();
+    closeViewModal();
+    renderGatheringCards();
+
+    showToast(`🗑️ 活動「${title || ''}」及其所有相關資料已成功永久刪除！`);
+  }
+
+  // Global escape and arrow keys handler
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (deleteActivityModal && deleteActivityModal.classList.contains('open')) {
+        closeDeleteModal();
+        return;
+      }
+      if (photoLightboxModal && photoLightboxModal.classList.contains('open')) {
+        closeLightbox();
+        return;
+      }
+      if (chatNameModal && chatNameModal.classList.contains('open')) {
+        closeChatNameModal();
+        return;
+      }
+      if (viewModal && viewModal.classList.contains('open')) closeViewModal();
+      if (createModal && createModal.classList.contains('open')) closeCreateModal();
+    } else if (photoLightboxModal && photoLightboxModal.classList.contains('open')) {
+      if (e.key === 'ArrowLeft') {
+        lightboxPrev();
+      } else if (e.key === 'ArrowRight') {
+        lightboxNext();
+      }
+    }
+  });
+}
+
+/* ==========================================================================
+   4. LocalStorage & Demo Data Persistence
+   ========================================================================== */
+function loadActivities() {
+  const demoExpiredActivity = {
+    id: 'demo_yl_3',
+    title: '夏日宜蘭海風露營',
+    creator: '冠宏',
+    deadline: '2026-08-20T20:00', // Past deadline -> Archived
+    cover: generateLuxurySvgCover('夏日宜蘭海風露營', '🏕️ 南澳海邊露營'),
+    options: [
+      '🏕️ 南澳海邊星空露營',
+      '🥩 炭烤和牛營火晚會',
+      '🌊 太平洋晨曦踏浪',
+      '🍻 徹夜微醺星空暢聊'
+    ],
+    createdAt: '2026-08-10T14:00:00.000Z',
+    isReadOnly: true
+  };
+
+  const defaultDemoList = [
+    {
+      id: 'demo_tc_1',
+      title: '台中週末吃喝團',
+      creator: '冠宏',
+      deadline: '2026-10-30T23:59',
+      cover: generateLuxurySvgCover('台中週末吃喝團', '🥩 屋馬和牛燒肉'),
+      options: [
+        '🥩 屋馬極上和牛燒肉',
+        '☕ 審計新村散步品手沖咖啡',
+        '🎤 享溫馨頂級奢華KTV',
+        '🧋 逢甲夜市排隊美食掃街'
+      ],
+      createdAt: '2026-09-15T18:00:00.000Z',
+      isReadOnly: true
+    },
+    {
+      id: 'demo_ml_2',
+      title: '苗栗一日遊',
+      creator: '冠宏',
+      deadline: '2026-11-15T20:00',
+      cover: generateLuxurySvgCover('苗栗一日遊', '🍓 大湖採草莓'),
+      options: [
+        '🍓 大湖採頂級高山草莓',
+        '🚂 舊山線鐵道自行車 Rail Bike',
+        '🍜 苗栗客家傳統手工粄條',
+        '♨️ 泰安景觀露天溫泉舒壓泡腳'
+      ],
+      createdAt: '2026-09-16T10:00:00.000Z',
+      isReadOnly: true
+    },
+    demoExpiredActivity
+  ];
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ACTIVITIES);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Ensure at least one expired activity exists in list for instant test verification
+        const now = new Date();
+        const hasExpired = parsed.some(a => new Date(a.deadline) <= now);
+        if (!hasExpired) {
+          parsed.push(demoExpiredActivity);
+          saveActivities(parsed);
+        }
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error loading activities from localStorage:', err);
+  }
+
+  saveActivities(defaultDemoList);
+  return defaultDemoList;
+}
+
+function saveActivities(list) {
+  try {
+    localStorage.setItem(STORAGE_KEY_ACTIVITIES, JSON.stringify(list));
+  } catch (err) {
+    console.error('Error saving activities to localStorage:', err);
+    showToast('⚠️ 儲存失敗：可能超過瀏覽器暫存容量');
+  }
+}
+
+function loadSelections() {
+  const demoExpiredSelections = [
+    { id: 'sel_yl_1', activityId: 'demo_yl_3', optionId: '🏕️ 南澳海邊星空露營', userName: '冠宏', createdAt: '2026-08-15T18:00:00.000Z' },
+    { id: 'sel_yl_2', activityId: 'demo_yl_3', optionId: '🏕️ 南澳海邊星空露營', userName: '小明', createdAt: '2026-08-15T18:10:00.000Z' },
+    { id: 'sel_yl_3', activityId: 'demo_yl_3', optionId: '🏕️ 南澳海邊星空露營', userName: '阿華', createdAt: '2026-08-15T18:15:00.000Z' },
+    { id: 'sel_yl_4', activityId: 'demo_yl_3', optionId: '🏕️ 南澳海邊星空露營', userName: '萱萱', createdAt: '2026-08-15T18:20:00.000Z' },
+    { id: 'sel_yl_5', activityId: 'demo_yl_3', optionId: '🏕️ 南澳海邊星空露營', userName: '柏翰', createdAt: '2026-08-15T18:25:00.000Z' },
+    { id: 'sel_yl_6', activityId: 'demo_yl_3', optionId: '🥩 炭烤和牛營火晚會', userName: '冠宏', createdAt: '2026-08-15T18:30:00.000Z' },
+    { id: 'sel_yl_7', activityId: 'demo_yl_3', optionId: '🥩 炭烤和牛營火晚會', userName: '小明', createdAt: '2026-08-15T18:32:00.000Z' },
+    { id: 'sel_yl_8', activityId: 'demo_yl_3', optionId: '🥩 炭烤和牛營火晚會', userName: '萱萱', createdAt: '2026-08-15T18:35:00.000Z' },
+    { id: 'sel_yl_9', activityId: 'demo_yl_3', optionId: '🥩 炭烤和牛營火晚會', userName: '柏翰', createdAt: '2026-08-15T18:40:00.000Z' },
+    { id: 'sel_yl_10', activityId: 'demo_yl_3', optionId: '🌊 太平洋晨曦踏浪', userName: '冠宏', createdAt: '2026-08-15T18:45:00.000Z' },
+    { id: 'sel_yl_11', activityId: 'demo_yl_3', optionId: '🌊 太平洋晨曦踏浪', userName: '阿華', createdAt: '2026-08-15T18:50:00.000Z' },
+    { id: 'sel_yl_12', activityId: 'demo_yl_3', optionId: '🌊 太平洋晨曦踏浪', userName: '柏翰', createdAt: '2026-08-15T18:55:00.000Z' },
+    { id: 'sel_yl_13', activityId: 'demo_yl_3', optionId: '🍻 徹夜微醺星空暢聊', userName: '冠宏', createdAt: '2026-08-15T19:00:00.000Z' },
+    { id: 'sel_yl_14', activityId: 'demo_yl_3', optionId: '🍻 徹夜微醺星空暢聊', userName: '小明', createdAt: '2026-08-15T19:05:00.000Z' },
+    { id: 'sel_yl_15', activityId: 'demo_yl_3', optionId: '🍻 徹夜微醺星空暢聊', userName: '阿華', createdAt: '2026-08-15T19:10:00.000Z' },
+    { id: 'sel_yl_16', activityId: 'demo_yl_3', optionId: '🍻 徹夜微醺星空暢聊', userName: '萱萱', createdAt: '2026-08-15T19:15:00.000Z' }
+  ];
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SELECTIONS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // Ensure demo_yl_3 selections exist
+        const hasYlSelections = parsed.some(s => s.activityId === 'demo_yl_3');
+        if (!hasYlSelections) {
+          parsed.push(...demoExpiredSelections);
+          saveSelections(parsed);
+        }
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error loading selections from localStorage:', err);
+  }
+
+  // Initial demo selections
+  const demoSelections = [
+    // 台中週末吃喝團
+    { id: 'sel_demo_1', activityId: 'demo_tc_1', optionId: '🥩 屋馬極上和牛燒肉', userName: '冠宏', createdAt: '2026-09-15T19:00:00.000Z' },
+    { id: 'sel_demo_2', activityId: 'demo_tc_1', optionId: '🥩 屋馬極上和牛燒肉', userName: '小明', createdAt: '2026-09-15T19:10:00.000Z' },
+    { id: 'sel_demo_3', activityId: 'demo_tc_1', optionId: '🥩 屋馬極上和牛燒肉', userName: '阿華', createdAt: '2026-09-15T19:15:00.000Z' },
+    { id: 'sel_demo_4', activityId: 'demo_tc_1', optionId: '☕ 審計新村散步品手沖咖啡', userName: '萱萱', createdAt: '2026-09-15T19:20:00.000Z' },
+    { id: 'sel_demo_5', activityId: 'demo_tc_1', optionId: '☕ 審計新村散步品手沖咖啡', userName: '小宇', createdAt: '2026-09-15T19:22:00.000Z' },
+    { id: 'sel_demo_6', activityId: 'demo_tc_1', optionId: '🎤 享溫馨頂級奢華KTV', userName: '小美', createdAt: '2026-09-15T19:30:00.000Z' },
+    { id: 'sel_demo_7', activityId: 'demo_tc_1', optionId: '🎤 享溫馨頂級奢華KTV', userName: '阿偉', createdAt: '2026-09-15T19:35:00.000Z' },
+    { id: 'sel_demo_8', activityId: 'demo_tc_1', optionId: '🧋 逢甲夜市排隊美食掃街', userName: '冠宏', createdAt: '2026-09-15T19:40:00.000Z' },
+    { id: 'sel_demo_9', activityId: 'demo_tc_1', optionId: '🧋 逢甲夜市排隊美食掃街', userName: '志豪', createdAt: '2026-09-15T19:45:00.000Z' },
+
+    // 苗栗一日遊
+    { id: 'sel_demo_10', activityId: 'demo_ml_2', optionId: '🍓 大湖採頂級高山草莓', userName: '冠宏', createdAt: '2026-09-16T11:00:00.000Z' },
+    { id: 'sel_demo_11', activityId: 'demo_ml_2', optionId: '🍓 大湖採頂級高山草莓', userName: '雅婷', createdAt: '2026-09-16T11:05:00.000Z' },
+    { id: 'sel_demo_12', activityId: 'demo_ml_2', optionId: '🍓 大湖採頂級高山草莓', userName: '柏翰', createdAt: '2026-09-16T11:10:00.000Z' },
+    { id: 'sel_demo_13', activityId: 'demo_ml_2', optionId: '🚂 舊山線鐵道自行車 Rail Bike', userName: '冠宏', createdAt: '2026-09-16T11:15:00.000Z' },
+    { id: 'sel_demo_14', activityId: 'demo_ml_2', optionId: '🚂 舊山線鐵道自行車 Rail Bike', userName: '柏翰', createdAt: '2026-09-16T11:20:00.000Z' },
+    { id: 'sel_demo_15', activityId: 'demo_ml_2', optionId: '♨️ 泰安景泡露天溫泉舒壓泡腳', userName: '雅婷', createdAt: '2026-09-16T11:25:00.000Z' },
+    { id: 'sel_demo_16', activityId: 'demo_ml_2', optionId: '♨️ 泰安景觀露天溫泉舒壓泡腳', userName: '冠宏', createdAt: '2026-09-16T11:30:00.000Z' },
+
+    // 宜蘭海風露營（已截止回憶紀錄）
+    ...demoExpiredSelections
+  ];
+
+  saveSelections(demoSelections);
+  return demoSelections;
+}
+
+function saveSelections(list) {
+  try {
+    localStorage.setItem(STORAGE_KEY_SELECTIONS, JSON.stringify(list));
+  } catch (err) {
+    console.error('Error saving selections to localStorage:', err);
+    showToast('⚠️ 投票資料儲存失敗：可能超過容量');
+  }
+}
+
+/* ------------------- Chat Messages & User Persistence ------------------- */
+function loadMessages() {
+  const defaultDemoMessages = [
+    {
+      id: 'msg_demo_1',
+      activityId: 'demo_tc_1',
+      userName: '冠宏',
+      message: '大家週六有空嗎？',
+      createdAt: '2026-09-16T21:35:00.000Z'
+    },
+    {
+      id: 'msg_demo_2',
+      activityId: 'demo_tc_1',
+      userName: '小明',
+      message: '我可以！',
+      createdAt: '2026-09-16T21:36:00.000Z'
+    },
+    {
+      id: 'msg_demo_3',
+      activityId: 'demo_tc_1',
+      userName: '萱萱',
+      message: '我也加一，想吃屋馬燒肉！😋',
+      createdAt: '2026-09-16T21:38:00.000Z'
+    },
+    {
+      id: 'msg_demo_4',
+      activityId: 'demo_yl_3',
+      userName: '冠宏',
+      message: '這次海風露營大家裝備都有準備齊全嗎？',
+      createdAt: '2026-08-18T19:30:00.000Z'
+    },
+    {
+      id: 'msg_demo_5',
+      activityId: 'demo_yl_3',
+      userName: '阿偉',
+      message: '和牛跟炭火我都訂好了，期待營火晚會！🔥',
+      createdAt: '2026-08-18T19:35:00.000Z'
+    }
+  ];
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_MESSAGES);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error loading messages from localStorage:', err);
+  }
+
+  saveMessages(defaultDemoMessages);
+  return defaultDemoMessages;
+}
+
+function saveMessages(list) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(list));
+  } catch (err) {
+    console.error('Error saving messages to localStorage:', err);
+    showToast('⚠️ 聊天訊息儲存失敗：可能超過容量');
+  }
+}
+
+function loadChatUser() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_CHAT_USER);
+    if (stored && stored.trim()) {
+      return stored.trim();
+    }
+  } catch (e) {
+    // ignore
+  }
+  return '冠宏'; // Default sender name
+}
+
+function saveChatUser(userName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_CHAT_USER, userName);
+  } catch (e) {
+    console.error('Error saving chat user:', e);
+  }
+}
+
+function formatChatTime(dateTimeStr) {
+  if (!dateTimeStr) return '';
+  try {
+    const d = new Date(dateTimeStr);
+    if (isNaN(d.getTime())) return dateTimeStr;
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    return `${hours}:${mins}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+/* ------------------- Activity Memories & Photos Persistence (📸 活動回憶) ------------------- */
+function generateLuxuryMemoryPhotoSvg(title, subtitle, icon = '📸', themeColor = '#D4AF37') {
+  const safeTitle = escapeXML(title);
+  const safeSub = escapeXML(subtitle || 'MEMORIES');
+  const safeIcon = escapeXML(icon);
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+    <defs>
+      <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#141824"/>
+        <stop offset="50%" stop-color="#0B0D14"/>
+        <stop offset="100%" stop-color="#050608"/>
+      </linearGradient>
+      <linearGradient id="goldText" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#FCE79D"/>
+        <stop offset="50%" stop-color="${themeColor}"/>
+        <stop offset="100%" stop-color="#AA7C11"/>
+      </linearGradient>
+      <radialGradient id="glow" cx="50%" cy="40%" r="50%">
+        <stop offset="0%" stop-color="${themeColor}" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+      </radialGradient>
+      <pattern id="dotGrid" width="30" height="30" patternUnits="userSpaceOnUse">
+        <circle cx="15" cy="15" r="1" fill="rgba(212,175,55,0.12)"/>
+      </pattern>
+    </defs>
+
+    <rect width="800" height="600" fill="url(#bgGrad)"/>
+    <rect width="800" height="600" fill="url(#dotGrid)"/>
+    <circle cx="400" cy="260" r="260" fill="url(#glow)"/>
+
+    <!-- Decorative Border -->
+    <rect x="25" y="25" width="750" height="550" rx="16" fill="none" stroke="rgba(212,175,55,0.25)" stroke-width="1.5"/>
+    <rect x="35" y="35" width="730" height="530" rx="12" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+
+    <!-- Central Icon Circle -->
+    <circle cx="400" cy="220" r="64" fill="rgba(212,175,55,0.1)" stroke="url(#goldText)" stroke-width="2"/>
+    <text x="400" y="240" font-size="52" text-anchor="middle" font-family="'Segoe UI Emoji', sans-serif">${safeIcon}</text>
+
+    <!-- Title & Subtitle -->
+    <text x="400" y="350" fill="url(#goldText)" font-size="34" font-weight="700" font-family="'Outfit','Noto Sans TC',sans-serif" text-anchor="middle" letter-spacing="1.5">${safeTitle}</text>
+    <text x="400" y="395" fill="#A1A7B8" font-size="17" font-weight="500" font-family="'Outfit','Noto Sans TC',sans-serif" text-anchor="middle" letter-spacing="2.5">${safeSub}</text>
+
+    <!-- Bottom Badge -->
+    <text x="400" y="510" fill="rgba(212,175,55,0.6)" font-size="12" font-family="'Outfit',sans-serif" text-anchor="middle" letter-spacing="4">LAI GUAN HONG · EXCLUSIVE MEMORY ARCHIVE</text>
+  </svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function getDefaultDemoPhotos() {
+  return [
+    {
+      id: 'p_demo_yl_1',
+      activityId: 'demo_yl_3',
+      caption: '🏕️ 南澳海邊星空營地',
+      url: generateLuxuryMemoryPhotoSvg('南澳海邊星空營地', '🏕️ 太平洋微風與繁星點綴', '🏕️'),
+      uploadedAt: '2026-08-20T21:00:00.000Z'
+    },
+    {
+      id: 'p_demo_yl_2',
+      activityId: 'demo_yl_3',
+      caption: '🥩 極上炭烤和牛晚會',
+      url: generateLuxuryMemoryPhotoSvg('極上炭烤和牛晚會', '🥩 營火微醺與頂級美食', '🥩'),
+      uploadedAt: '2026-08-20T21:15:00.000Z'
+    },
+    {
+      id: 'p_demo_yl_3',
+      activityId: 'demo_yl_3',
+      caption: '🌊 太平洋晨曦踏浪時光',
+      url: generateLuxuryMemoryPhotoSvg('太平洋晨曦踏浪', '🌊 晨光灑落浪花的美好瞬間', '🌊'),
+      uploadedAt: '2026-08-21T06:30:00.000Z'
+    },
+    {
+      id: 'p_demo_yl_4',
+      activityId: 'demo_yl_3',
+      caption: '🍻 營火微醺星空暢聊',
+      url: generateLuxuryMemoryPhotoSvg('營火微醺暢聊', '🍻 兄弟好友深夜交心時光', '🍻'),
+      uploadedAt: '2026-08-20T23:45:00.000Z'
+    },
+    {
+      id: 'p_demo_yl_5',
+      activityId: 'demo_yl_3',
+      caption: '☕ 晨光野營手沖香醇咖啡',
+      url: generateLuxuryMemoryPhotoSvg('晨光手沖咖啡', '☕ 喚醒海風早晨的頂級風味', '☕'),
+      uploadedAt: '2026-08-21T07:15:00.000Z'
+    },
+    {
+      id: 'p_demo_yl_6',
+      activityId: 'demo_yl_3',
+      caption: '🌌 銀河星空好友大合照',
+      url: generateLuxuryMemoryPhotoSvg('銀河星空大合照', '🌌 難忘回憶·友情無價', '🌌'),
+      uploadedAt: '2026-08-20T22:30:00.000Z'
+    }
+  ];
+}
+
+function loadPhotos() {
+  const defaultPhotos = getDefaultDemoPhotos();
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PHOTOS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error loading photos from localStorage:', err);
+  }
+
+  return defaultPhotos;
+}
+
+function savePhotos(list) {
+  try {
+    // 嚴格保證：只快取 metadata 與公開 URL，絕不將新照片以 Base64 存入 LocalStorage
+    const sanitized = (list || []).map(p => {
+      return {
+        id: p.id,
+        activityId: p.activityId,
+        caption: p.caption || '',
+        storagePath: p.storagePath || '',
+        url: p.url,
+        uploadedAt: p.uploadedAt
+      };
+    });
+    localStorage.setItem(STORAGE_KEY_PHOTOS, JSON.stringify(sanitized));
+  } catch (err) {
+    console.warn('LocalStorage savePhotos warning:', err);
+  }
+}
+
+async function downloadPhoto(url, filename = 'activity_photo.jpg') {
+  try {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      const res = await fetch(url);
+      if (res.ok) {
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        showToast('📥 照片已開始下載！');
+        return;
+      }
+    }
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('📥 照片已開始下載！');
+  } catch (e) {
+    console.error('Download error:', e);
+    window.open(url, '_blank');
+  }
+}
+
+function compressImageToBlob(file, maxWidth = 1280, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width;
+        let h = img.height;
+        if (w > maxWidth) {
+          h = Math.round((h * maxWidth) / w);
+          w = maxWidth;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('圖片轉換失敗'));
+          }
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = () => reject(new Error('圖片載入失敗'));
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function dataUrlToBlob(dataUrl) {
+  const parts = dataUrl.split(',');
+  const mimeMatch = parts[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
+function readFileAndCompress(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxW = 1280;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxW) {
+          h = Math.round((h * maxW) / w);
+          w = maxW;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => resolve(e.target.result);
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ==========================================================================
+   5. Dynamic SVG Luxury Cover Generator (Default Fallback)
+   ========================================================================== */
+function generateLuxurySvgCover(title, subtitle) {
+  const safeTitle = escapeXML(title);
+  const safeSub = escapeXML(subtitle || 'PRIVATE GATHERING');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800" height="450">
+    <defs>
+      <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#141722"/>
+        <stop offset="50%" stop-color="#0B0D13"/>
+        <stop offset="100%" stop-color="#060709"/>
+      </linearGradient>
+      <linearGradient id="goldText" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#FCE79D"/>
+        <stop offset="50%" stop-color="#D4AF37"/>
+        <stop offset="100%" stop-color="#AA7C11"/>
+      </linearGradient>
+      <radialGradient id="goldGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#D4AF37" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+      </radialGradient>
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(212,175,55,0.06)" stroke-width="1"/>
+      </pattern>
+    </defs>
+
+    <rect width="800" height="450" fill="url(#bgGrad)"/>
+    <rect width="800" height="450" fill="url(#grid)"/>
+    <circle cx="400" cy="225" r="280" fill="url(#goldGlow)"/>
+
+    <!-- Geometric border frame -->
+    <rect x="25" y="25" width="750" height="400" rx="14" fill="none" stroke="rgba(212,175,55,0.22)" stroke-width="1"/>
+    <rect x="35" y="35" width="730" height="380" rx="10" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+
+    <!-- Crown Monogram Symbol -->
+    <path d="M 370 140 L 400 115 L 430 140 L 420 155 L 380 155 Z" fill="url(#goldText)"/>
+    <circle cx="400" cy="115" r="3" fill="#FCE79D"/>
+
+    <!-- Title & Subtitle -->
+    <text x="400" y="235" fill="url(#goldText)" font-size="34" font-weight="700" font-family="'Outfit','Noto Sans TC',sans-serif" text-anchor="middle" letter-spacing="1.5">${safeTitle}</text>
+    <text x="400" y="275" fill="#A1A7B8" font-size="16" font-weight="500" font-family="'Outfit','Noto Sans TC',sans-serif" text-anchor="middle" letter-spacing="3">${safeSub}</text>
+
+    <!-- Bottom Badge -->
+    <text x="400" y="360" fill="rgba(212,175,55,0.6)" font-size="12" font-family="'Outfit',sans-serif" text-anchor="middle" letter-spacing="4">LAI GUAN HONG · PRIVATE EXCLUSIVE</text>
+  </svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function escapeXML(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/* ==========================================================================
+   6. Toast Notification System
+   ========================================================================== */
+let toastTimeout;
+function showToast(message) {
+  const toast = document.getElementById('toastNotification');
+  const toastMsg = document.getElementById('toastMessage');
+  if (!toast || !toastMsg) return;
+
+  toastMsg.textContent = message;
+  toast.classList.add('show');
+
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 4200);
+}
+
+/* ==========================================================================
+   7. Scrollspy & Navigation Active State
+   ========================================================================== */
+function initSmoothScrollSpy() {
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('.desktop-nav .nav-link');
+
+  window.addEventListener('scroll', () => {
+    let currentId = '';
+    const scrollPos = window.scrollY + 130;
+
+    sections.forEach(sec => {
+      const top = sec.offsetTop;
+      const height = sec.offsetHeight;
+      if (scrollPos >= top && scrollPos < top + height) {
+        currentId = sec.getAttribute('id');
+      }
+    });
+
+    navLinks.forEach(link => {
+      link.classList.remove('active');
+      if (link.getAttribute('href') === `#${currentId}`) {
+        link.classList.add('active');
+      }
+    });
+  }, { passive: true });
+}
+
+/* ==========================================================================
+   8. Helper Utilities
+   ========================================================================== */
+function formatDateTime(dateTimeStr) {
+  if (!dateTimeStr) return '時間待討論';
+  try {
+    const d = new Date(dateTimeStr);
+    if (isNaN(d.getTime())) return dateTimeStr;
+
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+
+    return `${year}/${month}/${day} ${hours}:${mins}`;
+  } catch (e) {
+    return dateTimeStr;
+  }
+}
+
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+/* ==========================================================================
+   9. Supabase Cloud Database Manager (多人共享活動資料與即時同步)
+   ========================================================================== */
+const STORAGE_KEY_SUPABASE_CONFIG = 'LGH_EXCLUSIVE_SUPABASE_CONFIG_V1';
+
+// 預設 Supabase 雲端資料庫連線資訊（供 GitHub Pages 純靜態站點直接連線）
+// 安全保證：僅使用公開 Publishable / Anon Key 與 Project URL，符合 Supabase RLS 安全模型
+// 絕不包含 service_role / secret key / database password / JWT Secret
+const DEFAULT_SUPABASE_URL = 'https://znwqlfntqqoopzywhcxx.supabase.co';
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpud3FsZm50cXFvb3B6eXdoY3h4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2Nzc2NTQsImV4cCI6MjEwNTI1MzY1NH0.9DkK1jMS6BDEVh2wSOBoXnwC5bBOA8jRnyMrXIgzYqU';
+
+// 連線設定與實例狀態
+let supabaseConfig = {
+  url: '',
+  anonKey: ''
+};
+
+let supabaseClient = null;
+let isSupabaseReady = false;
+let cloudSyncCallbacks = {
+  onActivitiesSync: null,
+  onSelectionsSync: null,
+  onMessagesSync: null,
+  onPhotosSync: null
+};
+
+// 格式化與修正常見 Supabase URL 筆誤（如 znwqlfntqgoopzywhcxx -> znwqlfntqqoopzywhcxx）
+function normalizeSupabaseUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  let trimmed = url.trim().replace(/\/+$/, '');
+  if (trimmed.includes('znwqlfntqgoopzywhcxx')) {
+    trimmed = trimmed.replace('znwqlfntqgoopzywhcxx', 'znwqlfntqqoopzywhcxx');
+  }
+  return trimmed;
+}
+
+// 取得 Supabase 設定
+// 優先度：1. 本地 localStorage 自訂設定 -> 2. window 全域注入 -> 3. GitHub Pages 預設連線憑證 -> 4. Netlify Functions (回退相容)
+async function resolveSupabaseConfig() {
+  // 1. 檢查使用者在網頁或本機設定的 Supabase 連線資訊 (自訂覆蓋)
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SUPABASE_CONFIG);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const url = normalizeSupabaseUrl(parsed.url);
+      const key = (parsed.publishableKey || parsed.anonKey || '').trim();
+      if (url && key) {
+        return {
+          url: url,
+          anonKey: key,
+          source: '網頁自訂設定'
+        };
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  // 2. 檢查 window 全域注入 (若有)
+  const globalUrl = window.__SUPABASE_URL__ || (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.url);
+  const globalKey = window.__SUPABASE_PUBLISHABLE_KEY__ || window.__SUPABASE_ANON_KEY__ || (window.SUPABASE_CONFIG && (window.SUPABASE_CONFIG.publishableKey || window.SUPABASE_CONFIG.anonKey));
+  if (globalUrl && globalKey) {
+    return {
+      url: normalizeSupabaseUrl(globalUrl),
+      anonKey: String(globalKey).trim(),
+      source: '全域注入'
+    };
+  }
+
+  // 3. GitHub Pages 預設直連既有 Supabase Project（所有訪客裝置預設共享）
+  if (DEFAULT_SUPABASE_URL && DEFAULT_SUPABASE_PUBLISHABLE_KEY) {
+    return {
+      url: normalizeSupabaseUrl(DEFAULT_SUPABASE_URL),
+      anonKey: DEFAULT_SUPABASE_PUBLISHABLE_KEY.trim(),
+      source: 'GitHub Pages 預設雲端連線'
+    };
+  }
+
+  // 4. 若處於 Netlify 環境，嘗試向 Netlify Function 請求後台環境變數
+  if (typeof window !== 'undefined' && window.location && window.location.hostname.includes('netlify.app')) {
+    try {
+      const res = await fetch('/.netlify/functions/supabase-config', {
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const url = normalizeSupabaseUrl(data.supabaseUrl);
+        const key = (data.supabasePublishableKey || data.supabaseAnonKey || '').trim();
+        if (url && key) {
+          return {
+            url: url,
+            anonKey: key,
+            source: 'Netlify 環境變數'
+          };
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  return { url: '', anonKey: '', source: '未設定' };
+}
+
+// 初始化 Supabase Client 與雲端同步
+async function initSupabaseCloudSync(callbacks = {}) {
+  if (callbacks.onActivitiesSync) cloudSyncCallbacks.onActivitiesSync = callbacks.onActivitiesSync;
+  if (callbacks.onSelectionsSync) cloudSyncCallbacks.onSelectionsSync = callbacks.onSelectionsSync;
+  if (callbacks.onMessagesSync) cloudSyncCallbacks.onMessagesSync = callbacks.onMessagesSync;
+  if (callbacks.onPhotosSync) cloudSyncCallbacks.onPhotosSync = callbacks.onPhotosSync;
+
+  initCloudConfigModalUI();
+
+  if (typeof window.supabase === 'undefined') {
+    console.warn('Supabase JS SDK 尚未載入完成');
+    updateCloudStatusBadge(false, 'SDK 載入中...');
+    return;
+  }
+
+  let resolved = await resolveSupabaseConfig();
+  supabaseConfig.url = resolved.url;
+  supabaseConfig.anonKey = resolved.anonKey;
+
+  if (!supabaseConfig.url || !supabaseConfig.anonKey) {
+    console.log('ℹ️ 未檢測到 Supabase 連線金鑰，目前運行於本機快取模式。');
+    updateCloudStatusBadge(false, '本機快取 (點此設定 Supabase)');
+    return;
+  }
+
+  try {
+    supabaseClient = window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+      auth: { persistSession: false }
+    });
+
+    // 測試連線並檢查 activities table
+    let checkResult = await supabaseClient
+      .from('activities')
+      .select('*', { count: 'exact', head: true });
+
+    // 若自訂設定連線失敗且存在預設設定，自動無縫回退至 GitHub Pages 預設連線
+    if (checkResult.error && resolved.source !== 'GitHub Pages 預設雲端連線' && DEFAULT_SUPABASE_URL && DEFAULT_SUPABASE_PUBLISHABLE_KEY) {
+      console.warn(`自訂設定 [${resolved.source}] 連線異常 (${checkResult.error.message})，自動回退至 GitHub Pages 預設連線...`);
+      supabaseConfig.url = normalizeSupabaseUrl(DEFAULT_SUPABASE_URL);
+      supabaseConfig.anonKey = DEFAULT_SUPABASE_PUBLISHABLE_KEY.trim();
+      supabaseClient = window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+        auth: { persistSession: false }
+      });
+      checkResult = await supabaseClient
+        .from('activities')
+        .select('*', { count: 'exact', head: true });
+      resolved.source = 'GitHub Pages 預設雲端連線 (自動回退)';
+    }
+
+    if (checkResult.error) {
+      console.warn('Supabase 連線警示 (activities 表可能尚未建立):', checkResult.error.message);
+      updateCloudStatusBadge(false, '連線異常: ' + checkResult.error.message);
+      return;
+    }
+
+    isSupabaseReady = true;
+    console.log(`⚡ Supabase 雲端資料庫連線成功！來源：[${resolved.source}]`);
+    updateCloudStatusBadge(true, '雲端資料庫已連線');
+
+    // 立即從雲端同步活動、投票、聊天訊息與回憶照片
+    await fetchActivitiesFromCloud();
+    await fetchSelectionsFromCloud();
+    await fetchMessagesFromCloud();
+    await fetchPhotosFromCloud();
+
+    // 訂閱 Realtime 變更（即時跨設備同步）
+    setupCloudRealtime();
+
+    // 背景輪詢（每 10 秒自動檢查一次雲端是否有新活動、投票、聊天訊息或回憶照片，確保跨設備 100% 同步）
+    setInterval(async () => {
+      if (document.visibilityState === 'visible' && isSupabaseReady) {
+        await fetchActivitiesFromCloud();
+        await fetchSelectionsFromCloud();
+        await fetchMessagesFromCloud();
+        await fetchPhotosFromCloud();
+      }
+    }, 10000);
+
+    // 當使用者切換分頁回到網頁時，立即拉取最新活動、聊天訊息與回憶照片
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && isSupabaseReady) {
+        fetchActivitiesFromCloud();
+        fetchSelectionsFromCloud();
+        fetchMessagesFromCloud();
+        fetchPhotosFromCloud();
+      }
+    });
+
+  } catch (err) {
+    console.error('Supabase 初始化失敗:', err);
+    updateCloudStatusBadge(false, '連線錯誤: ' + err.message);
+  }
+}
+
+// 從 Supabase 讀取所有最新活動（絕不查詢 delete_password_hash，保護安全性）
+async function fetchActivitiesFromCloud() {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('activities')
+      .select('id, title, creator, location, cover, deadline, options, created_at, is_read_only')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('讀取雲端活動失敗:', error);
+      updateCloudStatusBadge(false, '連線異常: ' + (error.message || '讀取失敗'));
+      return;
+    }
+
+    const deletedIds = getDeletedActivityIds();
+    const cloudData = (data || []).filter(row => !deletedIds.has(row.id));
+    const existingCloudIds = new Set(cloudData.map(row => row.id));
+
+    // 安全單向遷移：將本地已存在的自訂活動 (以 lgh_act_ 開頭且未被刪除) 補同步至雲端
+    await migrateLocalActivitiesToCloud(existingCloudIds);
+
+    // 重新拉取以確保包含剛遷移的最新活動
+    let finalRows = cloudData;
+    if (existingCloudIds.size > cloudData.length) {
+      const refetched = await supabaseClient
+        .from('activities')
+        .select('id, title, creator, location, cover, deadline, options, created_at, is_read_only')
+        .order('created_at', { ascending: false });
+      if (!refetched.error && refetched.data) {
+        finalRows = refetched.data.filter(row => !deletedIds.has(row.id));
+      }
+    }
+
+    if (finalRows && finalRows.length > 0) {
+      // 明確將 Supabase snake_case 轉換為 JavaScript 原生的 camelCase
+      const cloudList = finalRows.map(row => ({
+        id: row.id,
+        title: row.title,
+        creator: row.creator,
+        location: row.location || '',
+        cover: row.cover,
+        deadline: row.deadline,
+        options: Array.isArray(row.options) 
+          ? row.options 
+          : (typeof row.options === 'string' ? JSON.parse(row.options || '[]') : []),
+        createdAt: row.created_at || row.createdAt,
+        isReadOnly: row.is_read_only ?? true
+      }));
+
+      // 更新前端狀態與本機快取
+      if (cloudSyncCallbacks.onActivitiesSync) {
+        cloudSyncCallbacks.onActivitiesSync(cloudList);
+      }
+    }
+  } catch (err) {
+    console.error('fetchActivitiesFromCloud 例外錯誤:', err);
+  }
+}
+
+// 將新建立的活動寫入 Supabase 雲端資料庫（透過後端 RPC 安全計算 bcrypt 雜湊，前端絕不儲存明文密碼）
+async function syncNewActivityToCloud(newActivity, deletePassword) {
+  if (!supabaseClient || !isSupabaseReady) {
+    console.warn('⚠️ 目前尚未連線雲端資料庫，無法寫入 Supabase。');
+    return { success: false, error: new Error('目前未連線至 Supabase 雲端資料庫') };
+  }
+
+  try {
+    // 呼叫 Supabase 安全 RPC，由 PostgreSQL pgcrypto 在後端產生 bcrypt hash 並儲存地點
+    const { data, error } = await supabaseClient.rpc('create_activity_with_location_and_password', {
+      p_id: newActivity.id,
+      p_title: newActivity.title,
+      p_creator: newActivity.creator,
+      p_location: String(newActivity.location || '').trim(),
+      p_cover: newActivity.cover || '',
+      p_deadline: String(newActivity.deadline || ''),
+      p_options: newActivity.options,
+      p_delete_password: deletePassword,
+      p_is_read_only: Boolean(newActivity.isReadOnly ?? true)
+    });
+
+    if (error) {
+      console.error('RPC create_activity_with_location_and_password 執行錯誤:', error);
+      if (error.message && error.message.includes('schema cache')) {
+        return { 
+          success: false, 
+          error: new Error('雲端資料庫尚未建立驗證函數（請先在 Supabase SQL Editor 執行含有 create_activity_with_location_and_password 的遷移腳本）') 
+        };
+      }
+      return { success: false, error };
+    }
+
+    // 嚴格校驗：只有在 data 存在且 data.success === true 時才判定成功，不可誤報成功
+    if (!data || data.success !== true) {
+      const errMsg = (data && data.error) ? data.error : '活動發布失敗（RPC 未回傳成功狀態）';
+      return { success: false, error: new Error(errMsg) };
+    }
+
+    console.log('✅ 活動（已設定地點與安全刪除密碼 hash）成功寫入 Supabase！');
+    fetchActivitiesFromCloud();
+    return { success: true };
+  } catch (err) {
+    console.error('syncNewActivityToCloud 例外錯誤:', err);
+    return { success: false, error: err };
+  }
+}
+
+// 透過後端 RPC 安全驗證密碼，再使用官方 Storage API 刪除照片檔案，最後聯集清理資料庫
+async function deleteActivityFromCloud(activityId, password) {
+  if (!supabaseClient || !isSupabaseReady) {
+    return { success: false, message: '目前未連線至 Supabase 雲端資料庫' };
+  }
+
+  try {
+    // 第一步：呼叫 RPC 驗證密碼並取得該活動的所有 Storage 照片路徑
+    const { data: verifyData, error: verifyErr } = await supabaseClient.rpc('get_activity_photos_for_deletion', {
+      p_activity_id: activityId,
+      p_password: password
+    });
+
+    if (verifyErr) {
+      console.error('RPC get_activity_photos_for_deletion 執行錯誤:', verifyErr);
+      return { success: false, message: verifyErr.message };
+    }
+
+    if (!verifyData || !verifyData.success) {
+      return {
+        success: false,
+        error: verifyData?.error || 'VERIFY_FAILED',
+        message: verifyData?.message || '密碼驗證未通過'
+      };
+    }
+
+    const photoPaths = Array.isArray(verifyData.photo_paths) ? verifyData.photo_paths : [];
+
+    // 第二步：使用 Supabase 官方 Storage API remove() 刪除 Storage 實體照片
+    if (photoPaths.length > 0) {
+      console.log(`🗑️ 正在透過 Supabase 官方 Storage API 清除 ${photoPaths.length} 張實體照片...`);
+      const { error: storageRemoveErr } = await supabaseClient.storage
+        .from('activity-photos')
+        .remove(photoPaths);
+
+      if (storageRemoveErr) {
+        console.error('Storage 實體照片刪除失敗:', storageRemoveErr);
+        return {
+          success: false,
+          error: 'STORAGE_DELETE_FAILED',
+          message: `Storage 相片檔案刪除失敗（${storageRemoveErr.message}），為防止產生孤兒檔案，活動資料庫尚未刪除。`
+        };
+      }
+      console.log('✅ Storage 實體照片已透過官方 Storage API 成功清除！');
+    }
+
+    // 第三步：呼叫 RPC 刪除 activity_photos metadata 與 activities/selections/messages 等資料
+    const { data: delData, error: delErr } = await supabaseClient.rpc('delete_activity_with_password', {
+      p_activity_id: activityId,
+      p_password: password
+    });
+
+    if (delErr) {
+      console.error('RPC delete_activity_with_password 執行錯誤:', delErr);
+      return { success: false, message: delErr.message };
+    }
+
+    if (!delData || !delData.success) {
+      return {
+        success: false,
+        error: delData?.error,
+        message: delData?.message || '活動資料刪除失敗'
+      };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('deleteActivityFromCloud 例外錯誤:', err);
+    return { success: false, message: err.message || '操作異常' };
+  }
+}
+
+// 為尚未設定刪除密碼的舊活動補設刪除密碼
+async function setActivityDeletePasswordOnCloud(activityId, newPassword) {
+  if (!supabaseClient || !isSupabaseReady) {
+    return { success: false, message: '目前未連線至 Supabase 雲端資料庫' };
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc('set_activity_delete_password', {
+      p_activity_id: activityId,
+      p_new_password: newPassword
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    if (data && !data.success) {
+      return { success: false, message: data.message || data.error };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+// 從 Supabase 讀取所有好友投票
+async function fetchSelectionsFromCloud() {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('selections')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.warn('讀取雲端投票紀錄失敗:', error.message);
+      return;
+    }
+
+    if (data && data.length > 0) {
+      // 明確將 Supabase snake_case 轉換為 JavaScript 原生的 camelCase
+      const cloudSelections = data.map(row => ({
+        id: row.id,
+        activityId: row.activity_id || row.activityId,
+        optionId: row.option_id || row.optionId,
+        userName: row.user_name || row.userName,
+        createdAt: row.created_at || row.createdAt
+      }));
+
+      if (cloudSyncCallbacks.onSelectionsSync) {
+        cloudSyncCallbacks.onSelectionsSync(cloudSelections);
+      }
+    }
+  } catch (err) {
+    console.error('fetchSelectionsFromCloud 例外錯誤:', err);
+  }
+}
+
+// 將好友投票同步至 Supabase（嚴格使用 INSERT，不使用 upsert/UPDATE/DELETE）
+async function syncNewSelectionsToCloud(newRows) {
+  if (!supabaseClient || !isSupabaseReady) {
+    console.warn('⚠️ 目前尚未連線雲端資料庫，投票僅保存在本機快取。');
+    return { success: false, error: new Error('目前未連線至雲端資料庫') };
+  }
+
+  try {
+    // 明確將 JavaScript camelCase 轉換為 Supabase snake_case
+    const dbRows = newRows.map(s => ({
+      id: s.id,
+      activity_id: s.activityId,
+      option_id: s.optionId,
+      user_name: s.userName,
+      created_at: s.createdAt
+    }));
+
+    const { error } = await supabaseClient.from('selections').insert(dbRows);
+    if (error) {
+      console.error('投票同步至雲端失敗:', error);
+      return { success: false, error };
+    } else {
+      console.log('✅ 投票已成功同步至 Supabase 雲端資料庫！');
+      fetchSelectionsFromCloud();
+      return { success: true };
+    }
+  } catch (err) {
+    console.error('syncNewSelectionsToCloud 例外錯誤:', err);
+    return { success: false, error: err };
+  }
+}
+
+// 舊活動安全遷移：只遷移 localStorage 中 id 以 lgh_act_ 開頭的活動，絕不 UPDATE、絕不 DELETE、絕不使用 upsert
+async function migrateLocalActivitiesToCloud(existingCloudIds) {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const localList = loadActivities();
+    // 嚴格篩選：只抓取使用者自訂建立之活動（ID 以 lgh_act_ 開頭）
+    const customActivities = localList.filter(a => a && typeof a.id === 'string' && a.id.startsWith('lgh_act_'));
+
+    const deletedIds = getDeletedActivityIds();
+    const pendingToMigrate = customActivities.filter(a => !existingCloudIds.has(a.id) && !deletedIds.has(a.id));
+
+    if (pendingToMigrate.length === 0) {
+      return;
+    }
+
+    console.log(`📦 檢測到 ${pendingToMigrate.length} 個本機自訂活動尚未同步，正在安全補傳至 Supabase...`);
+
+    for (const act of pendingToMigrate) {
+      try {
+        const row = {
+          id: act.id,
+          title: act.title,
+          creator: act.creator,
+          location: act.location || '',
+          cover: act.cover || '',
+          deadline: act.deadline,
+          options: act.options || [],
+          created_at: act.createdAt || new Date().toISOString(),
+          is_read_only: act.isReadOnly ?? true
+        };
+
+        const { error } = await supabaseClient.from('activities').insert([row]);
+        if (error) {
+          console.error(`活動 [${act.title}] 安全遷移失敗:`, error.message);
+        } else {
+          console.log(`✅ 活動 [${act.title}] 已安全登錄至雲端資料庫！`);
+          existingCloudIds.add(act.id);
+        }
+      } catch (insertErr) {
+        console.error(`活動 [${act.title}] 遷移過程發生異常:`, insertErr);
+      }
+    }
+  } catch (e) {
+    console.error('執行舊活動安全遷移時異常:', e);
+  }
+}
+
+// 從 Supabase 讀取所有最新聊天訊息
+async function fetchMessagesFromCloud() {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('messages')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.warn('讀取雲端聊天訊息警示:', error.message);
+      return;
+    }
+
+    if (data) {
+      // 安全單向遷移：將本地已存在的自訂聊天訊息補同步至雲端（絕不使用 upsert/UPDATE/DELETE）
+      await migrateLocalMessagesToCloud(data.map(m => m.id));
+
+      const cloudMessages = data.map(row => ({
+        id: row.id,
+        activityId: row.activity_id || row.activityId,
+        userName: row.user_name || row.userName,
+        message: row.message,
+        createdAt: row.created_at || row.createdAt
+      }));
+
+      if (cloudSyncCallbacks.onMessagesSync) {
+        cloudSyncCallbacks.onMessagesSync(cloudMessages);
+      }
+    }
+  } catch (err) {
+    console.error('fetchMessagesFromCloud 例外錯誤:', err);
+  }
+}
+
+// 將新聊天訊息寫入 Supabase 雲端資料庫（嚴格使用 INSERT，不使用 upsert/UPDATE/DELETE）
+async function syncNewMessageToCloud(newMsg) {
+  if (!supabaseClient || !isSupabaseReady) {
+    console.warn('⚠️ 目前尚未連線雲端資料庫，無法發布聊天訊息。');
+    return { success: false, error: new Error('目前未連線至 Supabase 雲端資料庫') };
+  }
+
+  try {
+    const dbRow = {
+      id: newMsg.id,
+      activity_id: newMsg.activityId,
+      user_name: newMsg.userName,
+      message: newMsg.message,
+      created_at: newMsg.createdAt
+    };
+
+    const { error } = await supabaseClient.from('messages').insert([dbRow]);
+    if (error) {
+      console.error('聊天訊息寫入 Supabase 失敗:', error);
+      return { success: false, error };
+    } else {
+      console.log('✅ 聊天訊息已成功寫入 Supabase 雲端資料庫！');
+      fetchMessagesFromCloud();
+      return { success: true };
+    }
+  } catch (err) {
+    console.error('syncNewMessageToCloud 例外錯誤:', err);
+    return { success: false, error: err };
+  }
+}
+
+// 舊聊天訊息安全遷移：只遷移 localStorage 中自訂留言（非 demo 預設留言），絕不 UPDATE、絕不 DELETE、絕不使用 upsert
+async function migrateLocalMessagesToCloud(cloudIdsArray) {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const existingCloudIds = new Set(cloudIdsArray || []);
+    const localList = loadMessages();
+    // 嚴格篩選：只抓取非 demo 預設留言，且雲端尚未存在的訊息
+    const pendingToMigrate = localList.filter(m => m && m.id && !existingCloudIds.has(m.id) && !m.id.startsWith('msg_demo_'));
+
+    if (pendingToMigrate.length === 0) return;
+
+    console.log(`📦 檢測到 ${pendingToMigrate.length} 則本機留言尚未同步，正在安全補傳至 Supabase...`);
+
+    for (const msg of pendingToMigrate) {
+      try {
+        const row = {
+          id: msg.id,
+          activity_id: msg.activityId,
+          user_name: msg.userName,
+          message: msg.message,
+          created_at: msg.createdAt
+        };
+        const { error } = await supabaseClient.from('messages').insert([row]);
+        if (!error) {
+          console.log(`✅ 本機留言 [${msg.id}] 已安全登錄至雲端資料庫！`);
+          existingCloudIds.add(msg.id);
+        }
+      } catch (insertErr) {
+        console.error(`留言 [${msg.id}] 遷移異常:`, insertErr);
+      }
+    }
+  } catch (e) {
+    console.error('執行舊留言安全遷移時異常:', e);
+  }
+}
+
+// 從 Supabase 讀取所有最新活動照片
+async function fetchPhotosFromCloud() {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('activity_photos')
+      .select('*')
+      .order('uploaded_at', { ascending: true });
+
+    if (error) {
+      console.warn('讀取雲端活動照片警示:', error.message);
+      return;
+    }
+
+    if (data) {
+      // 安全單向遷移：將本地已存在的自訂照片補同步至 Supabase Storage & activity_photos
+      await migrateLocalPhotosToCloud(data.map(p => p.id));
+
+      const cloudPhotos = data.map(row => ({
+        id: row.id,
+        activityId: row.activity_id || row.activityId,
+        caption: row.caption || '',
+        storagePath: row.storage_path || row.storagePath,
+        url: row.public_url || row.url,
+        uploadedAt: row.uploaded_at || row.uploadedAt
+      }));
+
+      // 合併預設示範照片 (如果尚未存在)
+      const defaultDemos = getDefaultDemoPhotos();
+      const mergedPhotos = [...cloudPhotos];
+      for (const demoP of defaultDemos) {
+        if (!mergedPhotos.some(p => p.id === demoP.id)) {
+          mergedPhotos.push(demoP);
+        }
+      }
+
+      if (cloudSyncCallbacks.onPhotosSync) {
+        cloudSyncCallbacks.onPhotosSync(mergedPhotos);
+      }
+    }
+  } catch (err) {
+    console.error('fetchPhotosFromCloud 例外錯誤:', err);
+  }
+}
+
+// 舊照片安全遷移：只遷移 localStorage 中自訂上傳照片（非 demo 預設照片），絕不 UPDATE、絕不 DELETE、絕不使用 upsert
+async function migrateLocalPhotosToCloud(cloudIdsArray) {
+  if (!supabaseClient || !isSupabaseReady) return;
+
+  try {
+    const existingCloudIds = new Set(cloudIdsArray || []);
+    const localList = loadPhotos();
+    // 嚴格篩選：只抓取非 demo 照片、雲端尚未存在、且包含本機 Base64 dataUrl 的照片
+    const pendingToMigrate = localList.filter(p => 
+      p && p.id && 
+      !existingCloudIds.has(p.id) && 
+      !p.id.startsWith('p_demo_') &&
+      typeof p.url === 'string' &&
+      p.url.startsWith('data:image/')
+    );
+
+    if (pendingToMigrate.length === 0) return;
+
+    console.log(`📦 檢測到 ${pendingToMigrate.length} 張本機照片尚未同步至雲端 Storage，正在安全補傳...`);
+
+    let migratedAny = false;
+    for (const photo of pendingToMigrate) {
+      try {
+        const blob = dataUrlToBlob(photo.url);
+        const storagePath = `${photo.activityId}/${photo.id}.jpg`;
+
+        // 1. 上傳實體檔案至 Storage
+        const { error: uploadErr } = await supabaseClient.storage
+          .from('activity-photos')
+          .upload(storagePath, blob, {
+            contentType: 'image/jpeg',
+            upsert: true
+          });
+
+        if (uploadErr) {
+          console.error(`舊照片 [${photo.id}] Storage 上傳失敗:`, uploadErr.message);
+          continue;
+        }
+
+        // 2. 取得 Public URL
+        const { data: pubData } = supabaseClient.storage
+          .from('activity-photos')
+          .getPublicUrl(storagePath);
+        const publicUrl = pubData ? pubData.publicUrl : '';
+
+        if (!publicUrl) {
+          console.error(`舊照片 [${photo.id}] 取得 Public URL 失敗`);
+          continue;
+        }
+
+        // 3. 寫入 activity_photos metadata
+        const row = {
+          id: photo.id,
+          activity_id: photo.activityId,
+          caption: photo.caption || '活動回憶照片',
+          storage_path: storagePath,
+          public_url: publicUrl,
+          uploaded_at: photo.uploadedAt || new Date().toISOString()
+        };
+
+        const { error: insertErr } = await supabaseClient
+          .from('activity_photos')
+          .insert([row]);
+
+        if (!insertErr) {
+          console.log(`✅ 舊照片 [${photo.id}] 已安全遷移至 Supabase Storage 與 activity_photos！`);
+          existingCloudIds.add(photo.id);
+          // 成功後將本機照片的 Base64 替換為 publicUrl，釋放 LocalStorage 空間
+          photo.url = publicUrl;
+          photo.storagePath = storagePath;
+          migratedAny = true;
+        } else {
+          console.error(`舊照片 [${photo.id}] 寫入 metadata 失敗:`, insertErr.message);
+        }
+      } catch (pErr) {
+        console.error(`舊照片 [${photo.id}] 遷移過程異常:`, pErr);
+      }
+    }
+
+    if (migratedAny) {
+      savePhotos(localList);
+    }
+  } catch (e) {
+    console.error('執行舊照片安全遷移時異常:', e);
+  }
+}
+
+// 設置 Supabase Realtime 即時推播監聽
+function setupCloudRealtime() {
+  if (!supabaseClient) return;
+  try {
+    supabaseClient
+      .channel('public_gatherings_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, (payload) => {
+        console.log('🔔 收到活動即時更新:', payload);
+        fetchActivitiesFromCloud();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'selections' }, (payload) => {
+        console.log('🔔 收到投票即時更新:', payload);
+        fetchSelectionsFromCloud();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+        console.log('💬 收到聊天室訊息即時更新:', payload);
+        fetchMessagesFromCloud();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_photos' }, (payload) => {
+        console.log('📸 收到相簿照片即時更新:', payload);
+        fetchPhotosFromCloud();
+      })
+      .subscribe((status) => {
+        console.log('📡 Supabase Realtime channel status:', status);
+      });
+  } catch (e) {
+    console.warn('建立 Realtime 連線異常 (將由定時輪詢自動補足):', e);
+  }
+}
+
+// 更新 Header 雲端連線狀態徽章
+function updateCloudStatusBadge(isConnected, text) {
+  const badge = document.getElementById('cloudSyncStatus');
+  const label = document.getElementById('cloudSyncText');
+  if (badge) {
+    badge.className = `cloud-sync-status ${isConnected ? 'connected' : 'offline'}`;
+  }
+  if (label) {
+    label.textContent = isConnected ? '🟢 雲端資料庫已連線' : `☁️ ${text || '本機模式'}`;
+  }
+}
+
+// 雲端設定彈窗介面交互
+function initCloudConfigModalUI() {
+  const badge = document.getElementById('cloudSyncStatus');
+  const modal = document.getElementById('cloudConfigModal');
+  const btnClose = document.getElementById('btnCloudModalClose');
+  const btnCancel = document.getElementById('btnCloudModalCancel');
+  const btnSave = document.getElementById('btnSaveCloudConfig');
+  const inputUrl = document.getElementById('cfgSupabaseUrl');
+  const inputKey = document.getElementById('cfgSupabaseAnonKey');
+  const statusDetail = document.getElementById('cloudStatusDetail');
+
+  if (!modal) return;
+
+  function openModal() {
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    if (inputUrl) inputUrl.value = supabaseConfig.url || DEFAULT_SUPABASE_URL || '';
+    if (inputKey) inputKey.value = supabaseConfig.anonKey || DEFAULT_SUPABASE_PUBLISHABLE_KEY || '';
+    if (statusDetail) {
+      if (isSupabaseReady) {
+        statusDetail.innerHTML = `
+          <div style="color: #4ade80; font-weight: 600; margin-bottom: 6px;">✅ 雲端資料庫已成功連線</div>
+          <div style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.6;">
+            • 目標 URL: <code style="color: var(--gold-light);">${escapeHTML(supabaseConfig.url)}</code><br>
+            • 目前模式: 多人共同連線同一份雲端資料庫 (GitHub Pages 跨裝置即時同步已就緒)！新增活動或投票將即時同步至所有好友裝置。
+          </div>
+        `;
+      } else {
+        statusDetail.innerHTML = `
+          <div style="color: #f59e0b; font-weight: 600; margin-bottom: 6px;">⚠️ 目前尚未連線雲端資料庫</div>
+          <div style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.6;">
+            • 目前儲存位置：瀏覽器本機 localStorage。<br>
+            • 預設支援 GitHub Pages 直接連線既有 Supabase Project，亦可直接於下方填寫 Publishable Key 並儲存測試。
+          </div>
+        `;
+      }
+    }
+  }
+
+  function closeModal() {
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  if (badge) badge.addEventListener('click', openModal);
+  if (btnClose) btnClose.addEventListener('click', closeModal);
+  if (btnCancel) btnCancel.addEventListener('click', closeModal);
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  if (btnSave) {
+    btnSave.addEventListener('click', async () => {
+      const rawUrl = inputUrl ? inputUrl.value.trim() : '';
+      const url = normalizeSupabaseUrl(rawUrl);
+      const key = inputKey ? inputKey.value.trim() : '';
+
+      if (!url || !key) {
+        showToast('⚠️ 請輸入完整的 Supabase URL 與 Publishable Key');
+        return;
+      }
+
+      btnSave.disabled = true;
+      btnSave.textContent = '連線測試中...';
+
+      try {
+        if (typeof window.supabase === 'undefined') {
+          throw new Error('Supabase SDK 尚未載入');
+        }
+        const testClient = window.supabase.createClient(url, key, { auth: { persistSession: false } });
+        const { error } = await testClient.from('activities').select('*', { count: 'exact', head: true });
+
+        if (error && !error.message.includes('not found')) {
+          throw error;
+        }
+
+        // 儲存設定 (同時寫入 anonKey 與 publishableKey 確保相容性)
+        localStorage.setItem(STORAGE_KEY_SUPABASE_CONFIG, JSON.stringify({ url, anonKey: key, publishableKey: key }));
+        supabaseConfig.url = url;
+        supabaseConfig.anonKey = key;
+        supabaseClient = testClient;
+        isSupabaseReady = true;
+
+        updateCloudStatusBadge(true, '雲端資料庫已連線');
+        showToast('✅ 雲端資料庫連線成功！已切換為多人共享模式。');
+        closeModal();
+
+        await fetchActivitiesFromCloud();
+        await fetchSelectionsFromCloud();
+        await fetchMessagesFromCloud();
+      } catch (err) {
+        showToast(`❌ 連線失敗：${err.message}`);
+        if (statusDetail) {
+          statusDetail.innerHTML = `<div style="color: #ef4444;">❌ 連線失敗: ${escapeHTML(err.message)}</div>`;
+        }
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = '儲存並測試連線';
+      }
+    });
+  }
+}

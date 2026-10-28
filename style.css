@@ -2579,6 +2579,122 @@ label {
   line-height: 1.3;
 }
 
+/* Activity View Modal - Location Bar & Google Maps Link */
+.view-location-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 18px;
+  background: rgba(212, 175, 55, 0.05);
+  border: 1px solid rgba(212, 175, 55, 0.22);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color var(--trans-smooth), background-color var(--trans-smooth);
+}
+
+.view-location-bar:hover {
+  background: rgba(212, 175, 55, 0.08);
+  border-color: rgba(212, 175, 55, 0.4);
+}
+
+.view-location-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.view-location-icon {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.view-location-label {
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.view-location-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gold-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-view-map-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(212, 175, 55, 0.12);
+  border: 1px solid var(--gold-border);
+  color: var(--gold-light);
+  text-decoration: none;
+  font-family: var(--font-sans);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--trans-smooth);
+  flex-shrink: 0;
+}
+
+.btn-view-map-link:hover {
+  background: var(--gold-gradient);
+  border-color: transparent;
+  color: #07080B;
+  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-view-map-link:active {
+  transform: translateY(0);
+}
+
+.btn-view-map-link .btn-map-icon {
+  font-size: 0.95rem;
+}
+
+.btn-view-map-link .btn-map-arrow {
+  font-size: 0.88rem;
+  transition: transform var(--trans-smooth);
+}
+
+.btn-view-map-link:hover .btn-map-arrow {
+  transform: translate(2px, -2px);
+}
+
+@media (max-width: 640px) {
+  .view-location-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .view-location-info {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .view-location-name {
+    white-space: normal;
+    word-break: break-word;
+  }
+  .btn-view-map-link {
+    width: 100%;
+    justify-content: center;
+    padding: 9px 16px;
+  }
+}
+
 /* Action & Tally Bar */
 .view-action-bar {
   display: flex;

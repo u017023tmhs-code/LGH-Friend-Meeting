@@ -1296,6 +1296,9 @@ function initGatheringsManager() {
     const statusBadge = document.getElementById('viewActivityStatusBadge');
     const countBadge = document.getElementById('viewActivityOptionsCount');
     const expiredBanner = document.getElementById('expiredActivityBanner');
+    const locationBar = document.getElementById('viewActivityLocationBar');
+    const locationText = document.getElementById('viewActivityLocationText');
+    const locationMapLink = document.getElementById('viewActivityMapLink');
 
     const now = new Date();
     const deadlineDate = new Date(act.deadline);
@@ -1305,6 +1308,24 @@ function initGatheringsManager() {
     if (titleElem) titleElem.textContent = act.title;
     if (creatorElem) creatorElem.textContent = `👑 發起人：${act.creator}`;
     if (deadlineElem) deadlineElem.textContent = `📅 截止時間：${formatDateTime(act.deadline)}`;
+
+    // 地點與 Google Maps 連結安全渲染（防範 NULL / 空字串 / XSS）
+    const loc = (act && typeof act.location === 'string') ? act.location.trim() : '';
+    if (locationBar) {
+      if (loc) {
+        if (locationText) locationText.textContent = loc;
+        if (locationMapLink) {
+          const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(loc)}`;
+          locationMapLink.href = mapsUrl;
+          locationMapLink.setAttribute('aria-label', `在 Google 地圖中查看地點：${loc}`);
+        }
+        locationBar.style.display = 'flex';
+      } else {
+        locationBar.style.display = 'none';
+        if (locationText) locationText.textContent = '';
+        if (locationMapLink) locationMapLink.removeAttribute('href');
+      }
+    }
 
     // Update status badge: 🟢 選擇進行中 vs 🔒 選擇已結束
     if (statusBadge) {

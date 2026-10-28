@@ -696,6 +696,20 @@
 
         <h2 class="view-activity-title" id="viewModalTitle">活動標題</h2>
 
+        <!-- Activity Location Bar (Shown only when activity has location) -->
+        <div class="view-location-bar" id="viewActivityLocationBar" style="display: none;">
+          <div class="view-location-info">
+            <span class="view-location-icon">📍</span>
+            <span class="view-location-label">活動地點：</span>
+            <strong class="view-location-name" id="viewActivityLocationText"></strong>
+          </div>
+          <a href="#" target="_blank" rel="noopener noreferrer" class="btn-view-map-link" id="viewActivityMapLink">
+            <span class="btn-map-icon">🗺️</span>
+            <span>查看 Google 地圖</span>
+            <span class="btn-map-arrow">↗</span>
+          </a>
+        </div>
+
         <!-- Action & Tally Bar -->
         <div class="view-action-bar">
           <div class="voters-summary-tag" id="viewActivityVotersSummary">
